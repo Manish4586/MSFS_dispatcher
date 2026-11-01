@@ -26,9 +26,6 @@ DATA_FILE = DATA_DIR / 'records.json'
 AIRPORTS_FILE = Path(os.getenv('AIRPORTS_FILE', BASE / 'data' / 'airports.csv'))
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN', '')
-
-# DISCORD_GUILD_ID is retained only as an optional command-sync override.
-# Publishing destinations are selected per authenticated user/session.
 GUILD_ID = int(os.getenv('DISCORD_GUILD_ID', '0') or '0')
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
@@ -40,6 +37,7 @@ SESSION_TTL_SECONDS = int(os.getenv('SESSION_TTL_SECONDS', '43200'))
 OAUTH_STATE_TTL_SECONDS = 600
 TTL_HOURS = 12
 _AIRPORT_CACHE: dict[str, dict[str, str]] | None = None
+_METAR_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 lock = asyncio.Lock()
@@ -454,6 +452,33 @@ async def airport_search(q: str = Query(default='', max_length=100),
             if len(results) >= limit:
                 break
     return {'count': len(results), 'results': results}
+
+
+@app.get('/api/metar')
+async def airport_metar(ids: str = Query(min_length=4, max_length=9)):
+    """Return recent METARs for up to two ICAO stations, cached briefly."""
+    stations = [part.strip().upper() for part in ids.split(',') if part.strip()]
+    if not stations or len(stations) > 2 or any(not re.fullmatch(r'[A-Z0-9]{4}', code) for code in stations):
+        raise HTTPException(status_code=400, detail='Provide one or two valid four-character ICAO station codes')
+    cache_key = ','.join(sorted(set(stations)))
+    now = asyncio.get_running_loop().time()
+    cached = _METAR_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return {'results': cached[1], 'cached': True}
+    url = 'https://aviationweather.gov/api/data/metar'
+    try:
+        async with httpx.AsyncClient(timeout=12.0, headers={'Accept': 'application/json', 'User-Agent': 'FLTPLAN-Dispatch/1.0'}) as client:
+            upstream = await client.get(url, params={'ids': ','.join(stations), 'format': 'json', 'hours': 3})
+        if upstream.status_code == 204:
+            rows = []
+        else:
+            upstream.raise_for_status()
+            data = upstream.json()
+            rows = data if isinstance(data, list) else []
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail='Live METAR service is temporarily unavailable') from exc
+    _METAR_CACHE[cache_key] = (now + 180, rows)
+    return {'results': rows, 'cached': False}
 
 
 @app.get('/api/health')
