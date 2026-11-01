@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment and secrets
+*.pem
+*.key
+*.crt
+secrets/
+credentials.json
+token.json
+
+# Application runtime
+*.log
+logs/
+tmp/
+temp/
+instance/
+uploads/
+storage/
+
+# Redis and databases
+dump.rdb
+appendonly.aof
+*.sqlite3
+*.db
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+test-results/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Deployment and runtime
+*.pid
+*.sock
+*.service.bak
+.cache/

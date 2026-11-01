@@ -19,15 +19,14 @@ import uvicorn
 from dotenv import load_dotenv
 
 BASE = Path(__file__).resolve().parent.parent
-                                                                                            
+
 load_dotenv(BASE / '.env', override=False)
 DATA_DIR = Path(os.getenv('DATA_DIR', BASE / 'data'))
 DATA_FILE = DATA_DIR / 'records.json'
 AIRPORTS_FILE = Path(os.getenv('AIRPORTS_FILE', BASE / 'data' / 'airports.csv'))
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN', '')
-                                                                  
-                                                                                                    
+
 # DISCORD_GUILD_ID is retained only as an optional command-sync override.
 # Publishing destinations are selected per authenticated user/session.
 GUILD_ID = int(os.getenv('DISCORD_GUILD_ID', '0') or '0')
@@ -155,7 +154,6 @@ async def rate_limit(key: str, limit: int, window_seconds: int) -> None:
 
 
 def client_ip(request: Request) -> str:
-    # Uvicorn proxy_headers=True trusts the local Nginx proxy for forwarded client IP.
     return request.client.host if request.client else 'unknown'
 
 
@@ -418,7 +416,6 @@ async def auth_logout(request: Request, response: Response):
 
 @app.get('/api/airports.csv')
 async def airports_csv():
-                                                                                
     if not AIRPORTS_FILE.is_file():
         raise HTTPException(status_code=404, detail='Airport CSV dataset is missing')
     return FileResponse(AIRPORTS_FILE, media_type='text/csv', filename='airports.csv',
@@ -550,9 +547,13 @@ async def setup_guild(interaction: discord.Interaction, channel: discord.TextCha
     await redis.set(f'fltplan:guild:{interaction.guild_id}:dispatcher_role', str(dispatcher_role.id))
     await audit('guild_configured', guild_id=str(interaction.guild_id), channel_id=str(channel.id), role_id=str(dispatcher_role.id), configured_by=str(interaction.user.id))
     await interaction.response.send_message(
-        f'FLTPLAN configured. Channel: {channel.mention}. Required publishing role: **{dispatcher_role.name}**.\n'
-        'Members must sign in to the dashboard with Discord and hold this role to publish.', ephemeral=True)
-
+        f'✈️ **MSFS FLTPLAN Dispatch configured successfully!**\n\n'
+        f'📢 **Publishing channel:** {channel.mention}\n'
+        f'🛡️ **Required publishing role:** **{dispatcher_role.name}**\n\n'
+        f'Members must sign in to the dashboard with Discord and hold the required role to publish flights.\n\n'
+        f'🌐 **Dashboard:** https://msfs-dispatch.mywire.org',
+        ephemeral=False
+    )
 
 @setup_guild.error
 async def setup_guild_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -598,7 +599,7 @@ def simbrief_aircraft_code(aircraft: str) -> str:
     for label, code in mappings:
         if label in value:
             return code
-                                                                                                     
+
     import re
     match = re.search(r'\b([A-Z0-9]{3,4})\b', value)
     return match.group(1) if match else ''
@@ -746,7 +747,7 @@ async def discord_worker():
     except Exception as exc:
         print(f'ERROR: Discord bot stopped ({type(exc).__name__}: {exc}). API will continue; publishing is disabled.')
     finally:
-                                                                         
+
         if not bot.is_closed():
             await bot.close()
 
@@ -771,7 +772,7 @@ async def main():
     ]
 
     try:
-                                                                                         
+
         await asyncio.gather(*tasks)
     finally:
         for task in tasks:
