@@ -1,0 +1,21 @@
+[Unit]
+Description=FLTPLAN MSFS Dispatch Bot and API
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=manish4586
+Group=manish4586
+WorkingDirectory=/home/manish4586/msfs
+EnvironmentFile=/home/manish4586/msfs/.env
+ExecStart=/home/manish4586/msfs/.venv/bin/python -m backend.app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/home/manish4586/msfs/data
+
+[Install]
+WantedBy=multi-user.target
