@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <title>FLTPLAN</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f5fb">
+<meta name="color-scheme" content="light dark">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Text:wght@400;500;600;700&display=swap');
@@ -25,10 +27,38 @@
   --pixel-lavender:#e9e2f8;
   --pixel-peach:#f7e7dc;
 }
+body.dark-theme{
+  color-scheme:dark;
+  --bg:#111116;
+  --panel:#1b1a22;
+  --panel-2:#25232e;
+  --line:#393643;
+  --amber:#c7b4f3;
+  --amber-dim:#66558c;
+  --green:#9bd0b2;
+  --green-dim:#416b57;
+  --paper:#f0edf6;
+  --paper-dim:#aaa5b5;
+  --red:#ff8a80;
+  --pixel-blue:#a9b8ef;
+  --pixel-lavender:#342b49;
+  --pixel-peach:#3b2b24;
+}
 *{box-sizing:border-box;}
 button,input,select{font:inherit;}
 button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #b9a7e8;outline-offset:2px;}
 ::selection{background:#ded3f3;color:#2c2147;}
+body.dark-theme ::selection{background:#51416f;color:#fff;}
+body.dark-theme .airport .tag{background:#23392f;color:#a8d9bd;border-color:#416b57;}
+body.dark-theme .liv{background:#22362e;color:#a8d9bd;border-color:#416b57;}
+body.dark-theme .chip.active,body.dark-theme .pgbtn.active{background:#342b49;color:#e4d8ff;border-color:#66558c;}
+body.dark-theme .btn.ghost:hover{background:#342b49;}
+body.dark-theme .warn{background:#3b2b24;border-color:#684b3b;color:#f0c6a8;}
+body.dark-theme .clock .blink{box-shadow:0 0 8px var(--green);}
+.theme-toggle{position:fixed;right:18px;top:18px;z-index:1000;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--panel);color:var(--paper);font-size:12px;font-weight:700;box-shadow:0 4px 18px rgba(0,0,0,.16);cursor:pointer;}
+.theme-toggle:hover{border-color:var(--amber);color:var(--amber);}
+.theme-toggle:focus-visible{outline:3px solid #b9a7e8;outline-offset:3px;}
+@media(max-width:520px){.theme-toggle{top:auto;right:14px;bottom:18px;padding:11px 14px;}}
 html,body{margin:0;background:var(--bg);color:var(--paper);font-family:'Google Sans Text','Google Sans',sans-serif;}
 .app{max-width:1160px;margin:0 auto;padding:30px 22px 80px;}
 
@@ -87,8 +117,8 @@ select{width:100%;background:var(--panel-2);border:1px solid var(--line);color:v
 .mid .dist{font-size:11px;margin-top:6px;}
 .mid .line{width:100%;height:1px;background:repeating-linear-gradient(90deg,var(--line) 0 6px,transparent 6px 12px);margin:6px 0;}
 
-.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);}
-.kv{background:var(--panel);padding:18px;}
+.kv-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);}
+.kv{background:var(--panel);padding:18px;min-width:0;}
 .kv label{display:block;font-size:11px;letter-spacing:.3px;text-transform:none;color:var(--paper-dim);font-weight:600;margin-bottom:7px;}
 .kv .v{font-size:18px;color:var(--paper);font-weight:500;}
 .kv .v.amber{color:var(--amber);}
@@ -98,11 +128,23 @@ select{width:100%;background:var(--panel-2);border:1px solid var(--line);color:v
 .section{padding:16px;border-top:1px solid var(--line);}
 .section h3{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--paper-dim);margin:0 0 12px;}
 .liveries{display:flex;flex-wrap:wrap;gap:7px;}
-.liv{font-size:12px;border:1px solid var(--green-dim);background:#edf5f0;color:var(--green);padding:7px 12px;border-radius:999px;letter-spacing:0;}
+.liv{display:inline-flex;align-items:center;gap:5px;font-size:12px;border:1px solid var(--green-dim);background:var(--panel-2);color:var(--green);padding:7px 12px;border-radius:999px;letter-spacing:0;text-decoration:none;cursor:pointer;transition:border-color .15s,background .15s;}
+.liv:hover{border-color:var(--green);background:var(--panel);}
+.livery-note{margin:10px 0 0;line-height:1.45;}
 
 .linkbar{display:flex;gap:10px;flex-wrap:wrap;padding:14px 16px;border-top:1px solid var(--line);}
 .linkbar a{color:var(--paper-dim);font-size:12px;text-decoration:none;border:1px solid var(--line);padding:9px 13px;border-radius:999px;letter-spacing:0;}
+
 .linkbar a:hover{color:var(--amber);border-color:var(--amber-dim);}
+.scenery-discovery{padding-top:13px;padding-bottom:13px;}
+.scenery-discovery .sm{margin:0 0 9px;line-height:1.45;color:var(--paper-dim);font-size:11px;}
+.scenery-points{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0 0;}
+.scenery-point{display:flex;flex:1 1 180px;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);min-width:0;}
+.scenery-point strong{font-size:11px;color:var(--paper);font-weight:600;}
+.scenery-point span{font-size:10px;color:var(--paper-dim);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.scenery-discovery .linkbar{padding:9px 0 0;border-top:0;}
+@media(max-width:520px){.kv{padding:13px 12px;}.kv .v{font-size:16px;}.kv .sm{font-size:10px;}.scenery-point{flex-basis:100%;}}
+
 
 .warn{margin:0 16px 16px;background:var(--pixel-peach);border:1px solid #edcdb8;color:#75452b;font-size:12px;padding:12px 14px;border-radius:14px;}
 
@@ -277,9 +319,28 @@ table.hist td.green{color:var(--green);}
   }
 }
 
+
+.metar-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.metar-card{background:var(--panel-2);border:1px solid var(--line);border-radius:16px;padding:14px;min-width:0;}
+.metar-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;}
+.metar-card-head strong{font-size:13px;color:var(--paper);}
+.metar-status{font-size:10px;color:var(--paper-dim);white-space:nowrap;}
+.metar-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
+.metar-metric{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px;min-width:0;}
+.metar-metric label{display:block;font-size:9px;letter-spacing:.8px;text-transform:uppercase;color:var(--paper-dim);margin-bottom:4px;}
+.metar-metric strong{display:block;font-size:15px;color:var(--paper);overflow-wrap:anywhere;}
+.metar-raw{font-size:10px;line-height:1.5;color:var(--paper-dim);margin:10px 0 0;overflow-wrap:anywhere;}
+.metar-category{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:700;background:var(--green-dim);color:var(--green);}
+.metar-category.ifr,.metar-category.lifr{background:#f4d8d8;color:#9b2525;}
+.metar-category.mvfr{background:#f5e7c5;color:#805a12;}
+body.dark-theme .metar-category.ifr,body.dark-theme .metar-category.lifr{background:#522b31;color:#ffb7b7;}
+body.dark-theme .metar-category.mvfr{background:#514326;color:#f4d58a;}
+@media(max-width:600px){.metar-grid{grid-template-columns:1fr;}.metar-card{padding:12px;}}
+
 </style>
 </head>
 <body>
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">☾ <span>Dark</span></button>
 <div class="app">
   <div class="hdr">
     <div>
@@ -390,8 +451,11 @@ table.hist td.green{color:var(--green);}
         </div>
 
         <div class="field" style="margin-top:4px;">
-          <label>Aircraft ICAO type code <span style="color:var(--paper-dim);text-transform:none;">(real SimBrief aircraft profile, e.g. B738, A320, A21N, B77W, A35K, AT76 — not the demo type above)</span></label>
-          <input type="text" id="sbType" placeholder="B738" maxlength="4" class="sbinput">
+          <label for="sbTypeSearch">Search aircraft, developer or ICAO code</label>
+          <input type="search" id="sbTypeSearch" class="sbinput" placeholder="e.g. Fenix A320, PMDG 737, A20N">
+          <label for="sbType" style="margin-top:10px;">SimBrief aircraft profile</label>
+          <select id="sbType" required><option value="">Select aircraft type…</option></select>
+          <div class="hint">Add-on variants are listed separately for easier identification. SimBrief receives the matching ICAO type code, not the simulator developer name.</div>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
@@ -440,7 +504,7 @@ table.hist td.green{color:var(--green);}
   </div>
   
 
-  <div class="footer-note">Airport data is served locally by the FLTPLAN server (ICAO/lat/lon/elevation/type data). Scenery category is computed from geography (elevation, latitude, coastline proximity, island-nation status, airport size) — not manually tagged. Search history is kept in-memory for this session only (not saved to disk/browser storage). Cross-check map.flightsim.to before flying.</div>
+  <div class="footer-note">Airport data is served locally by the FLTPLAN server (ICAO/lat/lon/elevation/type data). Scenery categories are geographic preferences computed from airport coordinates and reference heuristics; they never block route generation. Flightsim.to World Explorer is an optional community scenery discovery layer. Search history is kept in-memory for this session only (not saved to disk/browser storage). Cross-check map.flightsim.to before flying.</div>
   <footer class="site-footer" aria-label="Site footer">
     <span class="copyright">© 2025–26 Manish4586</span>
     <a href="https://github.com/manish4586" target="_blank" rel="noopener noreferrer" aria-label="Manish4586 on GitHub" title="GitHub — manish4586">
@@ -586,8 +650,8 @@ const AIRCRAFT = [
   {id:'crj', label:'Bombardier CRJ-700', cat:'Regional Jet', cruiseKts:450, rangeNm:1500, liveries:['Delta Connection','American Eagle','Lufthansa CityLine','Air Canada Express'], minNm:200, maxNm:1300},
   {id:'e190', label:'Embraer E190', cat:'Regional Jet', cruiseKts:460, rangeNm:2400, liveries:['Azul','KLM Cityhopper','JetBlue','Air Canada'], minNm:200, maxNm:2200},
   {id:'a319', label:'Airbus A319', cat:'Narrow-body', cruiseKts:450, rangeNm:3700, liveries:['easyJet','US Airways','British Airways','Frontier'], minNm:200, maxNm:3400},
-  {id:'a320', label:'Airbus A320neo', cat:'Narrow-body', cruiseKts:460, rangeNm:3300, liveries:['easyJet','Lufthansa','American Airlines','IndiGo','Qantas'], minNm:250, maxNm:3000},
-  {id:'a321', label:'Airbus A321neo', cat:'Narrow-body', cruiseKts:460, rangeNm:4000, liveries:['American Airlines','JetBlue Mint','Wizz Air','Spirit'], minNm:300, maxNm:3700},
+  {id:'a320', label:'Airbus A320ceo', cat:'Narrow-body', cruiseKts:460, rangeNm:3300, liveries:['easyJet','Lufthansa','American Airlines','IndiGo','Qantas'], minNm:250, maxNm:3000},
+  {id:'a321', label:'Airbus A321ceo', cat:'Narrow-body', cruiseKts:460, rangeNm:4000, liveries:['American Airlines','JetBlue Mint','Wizz Air','Spirit'], minNm:300, maxNm:3700},
   {id:'b737700', label:'Boeing 737-700', cat:'Narrow-body', cruiseKts:455, rangeNm:3000, liveries:['Southwest','WestJet','Generic livery'], minNm:200, maxNm:2800},
   {id:'b738', label:'Boeing 737-800', cat:'Narrow-body', cruiseKts:460, rangeNm:3000, liveries:['Ryanair','Southwest','United','Turkish Airlines'], minNm:250, maxNm:2800},
   {id:'b739', label:'Boeing 737-900ER', cat:'Narrow-body', cruiseKts:460, rangeNm:3200, liveries:['Alaska Airlines','Lion Air','KLM'], minNm:300, maxNm:3000},
@@ -599,7 +663,91 @@ const AIRCRAFT = [
   {id:'b777', label:'Boeing 777-300ER', cat:'Wide-body', cruiseKts:490, rangeNm:7370, liveries:['Emirates','Cathay Pacific','Air France','Singapore Airlines'], minNm:1400, maxNm:7000},
   {id:'b789', label:'Boeing 787-9 Dreamliner', cat:'Wide-body', cruiseKts:490, rangeNm:7600, liveries:['ANA','British Airways','Qatar Airways','LATAM'], minNm:1500, maxNm:7000},
   {id:'b748', label:'Boeing 747-8', cat:'Wide-body', cruiseKts:490, rangeNm:7800, liveries:['Lufthansa','Korean Air','Atlas Air Cargo'], minNm:1500, maxNm:7300},
+  {id:'c152',label:'Cessna 152',cat:'GA',cruiseKts:105,rangeNm:415,liveries:['Asobo','Training','Private'],minNm:0,maxNm:380},
+  {id:'c182',label:'Cessna 182T Skylane',cat:'GA',cruiseKts:145,rangeNm:915,liveries:['Asobo','Private','Utility'],minNm:0,maxNm:800},
+  {id:'c400',label:'Cessna 400 Corvalis',cat:'GA',cruiseKts:235,rangeNm:1100,liveries:['Private','Corporate'],minNm:0,maxNm:950},
+  {id:'bonanza',label:'Beechcraft Bonanza G36',cat:'GA',cruiseKts:176,rangeNm:920,liveries:['Asobo','Private'],minNm:0,maxNm:800},
+  {id:'baron',label:'Beechcraft Baron G58',cat:'GA',cruiseKts:200,rangeNm:1480,liveries:['Asobo','Private','Charter'],minNm:0,maxNm:1250},
+  {id:'da40',label:'Diamond DA40 NG',cat:'GA',cruiseKts:145,rangeNm:940,liveries:['Diamond','Training'],minNm:0,maxNm:800},
+  {id:'da62',label:'Diamond DA62',cat:'GA',cruiseKts:190,rangeNm:1290,liveries:['Diamond','Private'],minNm:0,maxNm:1100},
+  {id:'visionjet',label:'Cirrus Vision Jet SF50',cat:'Very Light Jet',cruiseKts:300,rangeNm:1200,liveries:['Cirrus','Private','Corporate'],minNm:100,maxNm:1000},
+  {id:'pc24',label:'Pilatus PC-24',cat:'Business Jet',cruiseKts:440,rangeNm:2000,liveries:['Pilatus','Corporate','Charter'],minNm:150,maxNm:1800},
+  {id:'citationcj4',label:'Cessna Citation CJ4',cat:'Business Jet',cruiseKts:440,rangeNm:2100,liveries:['Textron','Corporate','Charter'],minNm:150,maxNm:1900},
+  {id:'longitude',label:'Cessna Citation Longitude',cat:'Business Jet',cruiseKts:480,rangeNm:3500,liveries:['Textron','Corporate'],minNm:300,maxNm:3200},
+  {id:'phenom300',label:'Embraer Phenom 300E',cat:'Business Jet',cruiseKts:450,rangeNm:2000,liveries:['Embraer','Corporate'],minNm:150,maxNm:1800},
+  {id:'challenger350',label:'Bombardier Challenger 350',cat:'Business Jet',cruiseKts:470,rangeNm:3200,liveries:['Corporate','Charter'],minNm:250,maxNm:2900},
+  {id:'global7500',label:'Bombardier Global 7500',cat:'Business Jet',cruiseKts:510,rangeNm:7700,liveries:['Corporate','Private'],minNm:1000,maxNm:7000},
+  {id:'h135',label:'Airbus H135',cat:'Helicopter',cruiseKts:125,rangeNm:340,liveries:['EMS','Police','Utility'],minNm:0,maxNm:280},
+  {id:'h145',label:'Airbus H145',cat:'Helicopter',cruiseKts:135,rangeNm:400,liveries:['EMS','Rescue','Offshore'],minNm:0,maxNm:330},
+  {id:'bell407',label:'Bell 407',cat:'Helicopter',cruiseKts:125,rangeNm:330,liveries:['Utility','EMS','Tour'],minNm:0,maxNm:280},
+  {id:'bell429',label:'Bell 429',cat:'Helicopter',cruiseKts:145,rangeNm:400,liveries:['EMS','Corporate'],minNm:0,maxNm:330},
+  {id:'pc6',label:'Pilatus PC-6 Porter',cat:'Turboprop',cruiseKts:120,rangeNm:460,liveries:['Bush','Utility','Skydive'],minNm:0,maxNm:380},
+  {id:'pc21',label:'Pilatus PC-21',cat:'Turboprop',cruiseKts:320,rangeNm:800,liveries:['Training','Military'],minNm:100,maxNm:700},
+  {id:'c27j',label:'Leonardo C-27J Spartan',cat:'Turboprop',cruiseKts:315,rangeNm:1000,liveries:['Military','Cargo'],minNm:100,maxNm:900},
+  {id:'c130',label:'Lockheed C-130J Hercules',cat:'Turboprop',cruiseKts:350,rangeNm:2000,liveries:['Military','Cargo','Coast Guard'],minNm:200,maxNm:1800},
+  {id:'crj900',label:'Bombardier CRJ-900',cat:'Regional Jet',cruiseKts:450,rangeNm:1550,liveries:['Delta Connection','Lufthansa CityLine','Air Canada Express'],minNm:200,maxNm:1400},
+  {id:'crj1000',label:'Bombardier CRJ-1000',cat:'Regional Jet',cruiseKts:455,rangeNm:1600,liveries:['Air France','Garuda','HOP!'],minNm:200,maxNm:1450},
+  {id:'e175',label:'Embraer E175',cat:'Regional Jet',cruiseKts:450,rangeNm:2200,liveries:['United Express','American Eagle','Alaska'],minNm:150,maxNm:2000},
+  {id:'e195',label:'Embraer E195-E2',cat:'Regional Jet',cruiseKts:465,rangeNm:2600,liveries:['Azul','KLM Cityhopper','Porter'],minNm:200,maxNm:2350},
+  {id:'a220',label:'Airbus A220-300',cat:'Narrow-body',cruiseKts:470,rangeNm:3400,liveries:['AirBaltic','Delta','JetBlue'],minNm:250,maxNm:3100},
+  {id:'a20n',label:'Airbus A320neo',cat:'Narrow-body',cruiseKts:460,rangeNm:3500,liveries:['IndiGo','Lufthansa','Wizz Air'],minNm:250,maxNm:3200},
+  {id:'a21n',label:'Airbus A321neo',cat:'Narrow-body',cruiseKts:465,rangeNm:4000,liveries:['IndiGo','Wizz Air','JetBlue'],minNm:300,maxNm:3700},
+  {id:'a321xlr',label:'Airbus A321XLR',cat:'Narrow-body',cruiseKts:465,rangeNm:4700,liveries:['Iberia','American Airlines'],minNm:400,maxNm:4300},
+  {id:'b737max9',label:'Boeing 737 MAX 9',cat:'Narrow-body',cruiseKts:470,rangeNm:3500,liveries:['United','Alaska','Copa'],minNm:300,maxNm:3200},
+  {id:'b757',label:'Boeing 757-200',cat:'Narrow-body',cruiseKts:470,rangeNm:3900,liveries:['Delta','United','Icelandair'],minNm:300,maxNm:3500},
+  {id:'b763',label:'Boeing 767-300ER',cat:'Wide-body',cruiseKts:460,rangeNm:5600,liveries:['Delta','United','LATAM'],minNm:1000,maxNm:5200},
+  {id:'b764',label:'Boeing 767-400ER',cat:'Wide-body',cruiseKts:465,rangeNm:5600,liveries:['Delta','United'],minNm:1000,maxNm:5200},
+  {id:'a332',label:'Airbus A330-200',cat:'Wide-body',cruiseKts:470,rangeNm:7250,liveries:['Delta','Qatar','Air France'],minNm:1200,maxNm:6800},
+  {id:'a339',label:'Airbus A330-900neo',cat:'Wide-body',cruiseKts:480,rangeNm:7200,liveries:['Delta','Condor','Cebu Pacific'],minNm:1200,maxNm:6700},
+  {id:'a359',label:'Airbus A350-900',cat:'Wide-body',cruiseKts:495,rangeNm:8100,liveries:['Singapore','Qatar','Cathay Pacific'],minNm:1500,maxNm:7500},
+  {id:'a35k',label:'Airbus A350-1000',cat:'Wide-body',cruiseKts:495,rangeNm:8700,liveries:['British Airways','Qatar','Cathay Pacific'],minNm:1600,maxNm:8000},
+  {id:'a388',label:'Airbus A380-800',cat:'Wide-body',cruiseKts:490,rangeNm:8200,liveries:['Emirates','Singapore','Lufthansa'],minNm:1800,maxNm:7600},
+  {id:'b772',label:'Boeing 777-200ER',cat:'Wide-body',cruiseKts:485,rangeNm:7000,liveries:['United','Emirates','British Airways'],minNm:1300,maxNm:6500},
+  {id:'b77w',label:'Boeing 777-300ER',cat:'Wide-body',cruiseKts:490,rangeNm:7370,liveries:['Emirates','Cathay Pacific','Air France'],minNm:1400,maxNm:7000},
+  {id:'b788',label:'Boeing 787-8',cat:'Wide-body',cruiseKts:490,rangeNm:7350,liveries:['ANA','United','Qatar'],minNm:1300,maxNm:6800},
+  {id:'b78x',label:'Boeing 787-10',cat:'Wide-body',cruiseKts:490,rangeNm:6400,liveries:['United','Etihad','Singapore'],minNm:1400,maxNm:5900},
+  {id:'b748f',label:'Boeing 747-8F',cat:'Cargo',cruiseKts:490,rangeNm:4400,liveries:['Atlas Air','Cargolux','UPS'],minNm:1000,maxNm:4000},
+  {id:'md11',label:'McDonnell Douglas MD-11F',cat:'Cargo',cruiseKts:480,rangeNm:6200,liveries:['FedEx','UPS','Lufthansa Cargo'],minNm:1000,maxNm:5700},
 ];
+
+
+const seenDispatcherAircraft = new Set();
+for (let i = 0; i < AIRCRAFT.length; i++) {
+  const key = `${(AIRCRAFT[i].label || '').toLowerCase().replace(/[^a-z0-9]/g, '')}|${AIRCRAFT[i].cat || ''}`;
+  if (seenDispatcherAircraft.has(key)) AIRCRAFT.splice(i--, 1);
+  else seenDispatcherAircraft.add(key);
+}
+
+const SIMBRIEF_AIRCRAFT = [
+  ['General aviation', [['C172','Cessna 172 Skyhawk'],['C152','Cessna 152'],['C182','Cessna 182 Skylane'],['BE36','Beechcraft Bonanza G36'],['BE58','Beechcraft Baron 58'],['DA40','Diamond DA40'],['DA42','Diamond DA42'],['DA62','Diamond DA62'],['SR22','Cirrus SR22'],['SF50','Cirrus Vision Jet'],['PC12','Pilatus PC-12'],['PC24','Pilatus PC-24'],['TBM9','Daher TBM 930'],['C208','Cessna 208 Caravan'],['DHC6','DHC-6 Twin Otter'],['AT76','ATR 72'],['AT46','ATR 42'],['DH8D','Dash 8 Q400'],['SB20','Saab 2000'],['SF34','Saab 340']]],
+  ['Business jets', [['C25C','Citation CJ4'],['C56X','Citation XLS+'],['C700','Citation Longitude'],['E55P','Embraer Phenom 300'],['CL35','Challenger 350'],['GL7T','Global 7500'],['PC24','Pilatus PC-24'],['F2TH','Dassault Falcon 2000'],['FA7X','Dassault Falcon 7X'],['GLEX','Global Express']]],
+  ['Regional aircraft', [['CRJ7','Bombardier CRJ-700'],['CRJ9','Bombardier CRJ-900'],['CRJX','Bombardier CRJ-1000'],['E170','Embraer E170'],['E75L','Embraer E175'],['E190','Embraer E190'],['E295','Embraer E195-E2'],['BCS3','Airbus A220-300']]],
+  ['Airbus', [['A318','Airbus A318'],['A319','Airbus A319'],['A320','Airbus A320 (generic profile)'],['A320','Fenix Simulations A320ceo'],['A20N','Asobo A320neo'],['A20N','FlyByWire A32NX'],['A20N','iniBuilds A320neo'],['A20N','Airbus A320neo (generic profile)'],['A321','Airbus A321'],['A21N','Airbus A321neo'],['A332','Airbus A330-200'],['A333','Airbus A330-300'],['A339','Airbus A330-900neo'],['A342','Airbus A340-200'],['A343','Airbus A340-300'],['A346','Airbus A340-600'],['A359','Airbus A350-900'],['A35K','Airbus A350-1000'],['A388','Airbus A380-800']]],
+  ['Boeing', [['B712','Boeing 717'],['B737','Boeing 737-700'],['B738','Boeing 737-800 (generic profile)'],['B738','PMDG 737-800'],['B739','Boeing 737-900ER'],['B37M','Boeing 737 MAX 7'],['B38M','Boeing 737 MAX 8'],['B39M','Boeing 737 MAX 9'],['B752','Boeing 757-200'],['B753','Boeing 757-300'],['B762','Boeing 767-200'],['B763','Boeing 767-300ER (generic profile)'],['B764','Boeing 767-400ER'],['B772','Boeing 777-200ER'],['B77L','Boeing 777-200LR'],['B77W','Boeing 777-300ER (generic profile)'],['B77W','PMDG 777-300ER'],['B778','Boeing 777-8'],['B779','Boeing 777-9'],['B788','Boeing 787-8'],['B789','Boeing 787-9'],['B78X','Boeing 787-10'],['B744','Boeing 747-400'],['B748','Boeing 747-8']]],
+  ['Cargo / special', [['B744','Boeing 747-400F'],['B748','Boeing 747-8F'],['B77L','Boeing 777F'],['MD11','McDonnell Douglas MD-11F'],['A306','Airbus A300-600F'],['C130','Lockheed C-130 Hercules']]]
+];
+const DISPATCH_TO_SIMBRIEF = {c172:'C172',c152:'C152',c182:'C182',sr22:'SR22',bonanza:'BE36',baron:'BE58',da40:'DA40',da62:'DA62',visionjet:'SF50',pc12:'PC12',pc24:'PC24',tbm930:'TBM9',caravan:'C208',twinotter:'DHC6',dash8q400:'DH8D',atr72:'AT76',atr42:'AT46',saab340:'SF34',crj:'CRJ7',crj900:'CRJ9',crj1000:'CRJX',e175:'E75L',e190:'E190',e195:'E295',a220:'BCS3',a319:'A319',a320:'A320',a20n:'A20N',a321:'A321',a21n:'A21N',a321xlr:'A21N',b737700:'B737',b738:'B738',b739:'B739',b38m:'B38M',b737max9:'B39M',b757:'B752',a330:'A333',a332:'A332',a339:'A339',a340:'A346',a350:'A359',a359:'A359',a35k:'A35K',a388:'A388',b767:'B763',b763:'B763',b764:'B764',b777:'B77W',b772:'B772',b77w:'B77W',b789:'B789',b788:'B788',b78x:'B78X',b748:'B748',b748f:'B748',md11:'MD11',citationcj4:'C25C',longitude:'C700',phenom300:'E55P',challenger350:'CL35',global7500:'GL7T'};
+function populateSimbriefAircraft(filter=''){
+  const select=document.getElementById('sbType');
+  const current=select.value;
+  const q=filter.trim().toLowerCase();
+  select.innerHTML='<option value="">Select aircraft type…</option>';
+  SIMBRIEF_AIRCRAFT.forEach(([group,items])=>{
+    const matches=items.filter(([code,name])=>!q || `${name} ${code} ${group}`.toLowerCase().includes(q));
+    if(!matches.length) return;
+    const optgroup=document.createElement('optgroup'); optgroup.label=group;
+    matches.forEach(([code,name])=>{
+      const option=document.createElement('option');
+      option.value=code;
+      option.textContent=`${name} (${code})`;
+      optgroup.appendChild(option);
+    });
+    select.appendChild(optgroup);
+  });
+  if(current && [...select.options].some(o=>o.value===current)) select.value=current;
+}
+populateSimbriefAircraft();
+document.getElementById('sbTypeSearch').addEventListener('input',e=>populateSimbriefAircraft(e.target.value));
 
 
 let state = { scenery:'mountain', time:'auto' };
@@ -687,8 +835,14 @@ tickClock(); setInterval(tickClock,1000);
 let planSeq = 0;
 
 function airportsForScenery(sceneryId){
-  if(sceneryId==='any') return AIRPORTS;
-  return AIRPORTS.filter(a=>a.scenery.includes(sceneryId));
+  return AIRPORTS;
+}
+
+function sceneryMatchScore(dep, arr, sceneryId){
+  if(!sceneryId || sceneryId==='any') return 0;
+  const depMatch = Array.isArray(dep.scenery) && dep.scenery.includes(sceneryId);
+  const arrMatch = Array.isArray(arr.scenery) && arr.scenery.includes(sceneryId);
+  return (depMatch ? 1 : 0) + (arrMatch ? 1 : 0);
 }
 
 function buildRoute(){
@@ -697,73 +851,126 @@ function buildRoute(){
   const timeId = state.time;
   const aircraftChoice = aircraftSelect.value;
 
-  const pool = airportsForScenery(sceneryId);
-  if(pool.length < 2){
-    return {error:`Not enough airports tagged "${sceneryId}" in the reference set — try another scenery category.`};
+  if(AIRPORTS.length < 2){
+    return {error:'Airport reference data is not ready or contains too few airports. Please reload and try again.'};
   }
+
+  const pool = airportsForScenery(sceneryId);
   const candidates = [];
-  for(let i=0;i<400;i++){
+  const seen = new Set();
+
+  for(let i=0; i<1400; i++){
     const dep = pick(pool);
-    let arr = pick(pool);
-    if(arr.icao===dep.icao) continue;
+    const arr = pick(pool);
+    if(!dep || !arr || arr.icao===dep.icao) continue;
+
+    const pairKey = [dep.icao,arr.icao].sort().join('-');
+    if(seen.has(pairKey)) continue;
+    seen.add(pairKey);
+
     const distNm = haversineNm(dep,arr);
     if(distNm < 15) continue;
-    candidates.push({dep,arr,distNm});
-  }
-  if(candidates.length===0) return {error:'Could not generate a valid pair — try a wider scenery category.'};
-  const seen = new Set();
-  const uniq = candidates.filter(c=>{
-    const k=[c.dep.icao,c.arr.icao].sort().join('-');
-    if(seen.has(k)) return false; seen.add(k); return true;
-  });
 
-  function aircraftFits(ac, distNm){
-    const flightMin = (distNm/ac.cruiseKts)*60 + 25; 
-    return flightMin<=maxMinutes && distNm<=ac.rangeNm*0.9 && distNm>=ac.minNm*0.5;
-  }
-
-  let result=null;
-
-  if(aircraftChoice==='auto'){
-    let best=null;
-    for(const c of uniq){
+    const matchScore = sceneryMatchScore(dep,arr,sceneryId);
+    if(aircraftChoice==='auto'){
       for(const ac of AIRCRAFT){
         if(ac.id==='auto') continue;
-        if(aircraftFits(ac,c.distNm)){
-          const flightMin=(c.distNm/ac.cruiseKts)*60+25;
-          const score = flightMin; 
-          if(!best || score>best.score){ best={...c, ac, flightMin, score}; }
+        const flightMin=(distNm/ac.cruiseKts)*60+25;
+        if(flightMin<=maxMinutes && distNm<=ac.rangeNm*0.9 && distNm>=ac.minNm*0.5){
+          candidates.push({dep,arr,distNm,ac,flightMin,matchScore});
         }
       }
-    }
-    if(!best) return {error:'No route + aircraft combination fits that time budget for this scenery. Try increasing max time.'};
-    result = best;
-  } else {
-    const ac = AIRCRAFT.find(a=>a.id===aircraftChoice);
-    let best=null;
-    for(const c of uniq){
-      if(aircraftFits(ac,c.distNm)){
-        const flightMin=(c.distNm/ac.cruiseKts)*60+25;
-        if(!best || flightMin>best.flightMin) best={...c, ac, flightMin};
+    } else {
+      const ac = AIRCRAFT.find(a=>a.id===aircraftChoice);
+      if(!ac) return {error:'The selected aircraft is not available. Please choose another aircraft.'};
+      const flightMin=(distNm/ac.cruiseKts)*60+25;
+      if(flightMin<=maxMinutes && distNm<=ac.rangeNm*0.9 && distNm>=ac.minNm*0.5){
+        candidates.push({dep,arr,distNm,ac,flightMin,matchScore});
       }
     }
-    if(!best) return {error:`No ${ac.label} route fits a ${fmtMin(maxMinutes)} budget in "${sceneryId}" scenery. Try Auto-select or raise the time limit.`};
-    result = best;
   }
+
+  if(!candidates.length){
+    const selected = aircraftChoice==='auto' ? 'any available aircraft' : AIRCRAFT.find(a=>a.id===aircraftChoice)?.label;
+    return {error:`No route fits the ${fmtMin(maxMinutes)} time limit with ${selected}. Increase the time limit or select a different aircraft.`};
+  }
+
+  const bestScore = Math.max(...candidates.map(c=>c.matchScore));
+  const preferred = candidates.filter(c=>c.matchScore===bestScore);
+
+  const target = maxMinutes * 0.78;
+  preferred.sort((a,b)=>Math.abs(a.flightMin-target)-Math.abs(b.flightMin-target));
+  const shortlist = preferred.slice(0, Math.max(1, Math.ceil(preferred.length*0.35)));
+  const result = pick(shortlist);
 
   const dep = result.dep, arr = result.arr, ac = result.ac;
   const sugg = suggestDepartureUTC(dep, timeId);
   const resolvedTimeLabel = timeId==='auto' ? 'Day (auto)' : TIMES.find(t=>t.id===timeId).label;
+  const sceneryLabel = SCENERY.find(s=>s.id===sceneryId)?.label || sceneryId;
+  const matchLabel = sceneryId==='any' ? 'Random scenery' :
+    (bestScore===2 ? 'Preference matched at both airports' :
+     bestScore===1 ? 'Preference matched near one airport' :
+     'Scenery preference unavailable — showing best available route');
 
   return {
     dep, arr, ac,
     distNm: result.distNm,
     flightMin: result.flightMin,
-    sceneryLabel: SCENERY.find(s=>s.id===sceneryId)?.label || sceneryId,
+    sceneryLabel,
+    sceneryMatchLabel: matchLabel,
     timeLabel: resolvedTimeLabel,
     depLocalTarget: sugg.localHour,
     depUTC: `${String(sugg.hh).padStart(2,'0')}:${String(sugg.mm).padStart(2,'0')} UTC`,
   };
+}
+
+let metarRequestSequence = 0;
+const escapeHtml = value => String(value ?? '—').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+function metarValue(value, suffix='') {
+  if (value === null || value === undefined || value === '') return '—';
+  return `${value}${suffix}`;
+}
+function renderMetarCard(targetId, icao, item, error='') {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  if (!item) {
+    target.innerHTML = `<div class="metar-card-head"><strong>${icao} · ${targetId==='metarDep'?'Departure':'Arrival'}</strong><span class="metar-status">Unavailable</span></div><div class="sm">${escapeHtml(error || 'No recent METAR is available for this airport.')}</div>`;
+    return;
+  }
+  const windDir = item.wdir === 'VRB' ? 'VRB' : (item.wdir != null ? `${item.wdir}°` : '—');
+  const wind = `${windDir} / ${metarValue(item.wspd, ' kt')}${item.wgst != null ? ` G${item.wgst} kt` : ''}`;
+  const category = String(item.fltcat || '').toUpperCase();
+  const observedValue = item.reportTime || item.obsTime;
+  const observedDate = observedValue ? new Date(typeof observedValue === 'number' ? observedValue * 1000 : observedValue) : null;
+  const observed = observedDate && !Number.isNaN(observedDate.getTime()) ? observedDate.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'UTC'})+' UTC' : 'Observation time unavailable';
+  target.innerHTML = `
+    <div class="metar-card-head"><strong>${escapeHtml(icao)} · ${targetId==='metarDep'?'Departure':'Arrival'}</strong><span class="metar-status">${escapeHtml(observed)}</span></div>
+    <div class="metar-metrics">
+      <div class="metar-metric"><label>Wind</label><strong>${escapeHtml(wind)}</strong></div>
+      <div class="metar-metric"><label>Visibility</label><strong>${escapeHtml(metarValue(item.visib, ' SM'))}</strong></div>
+      <div class="metar-metric"><label>Temp / Dewpoint</label><strong>${escapeHtml(metarValue(item.temp, '°C')+' / '+metarValue(item.dewp, '°C'))}</strong></div>
+      <div class="metar-metric"><label>Altimeter</label><strong>${escapeHtml(metarValue(item.altim, ' inHg'))}</strong></div>
+    </div>
+    <div class="metar-card-head" style="margin:10px 0 0"><span class="metar-category ${escapeHtml(category.toLowerCase())}">${escapeHtml(category || 'CATEGORY N/A')}</span><span class="metar-status">Aviation Weather Center</span></div>
+    <p class="metar-raw">${escapeHtml(item.rawOb || 'Raw METAR unavailable')}</p>`;
+}
+async function loadRouteMetars(r) {
+  const requestId = ++metarRequestSequence;
+  const ids = [r.dep.icao, r.arr.icao].filter(Boolean).join(',');
+  try {
+    const response = await fetch(`/msfs/api/metar?ids=${encodeURIComponent(ids)}`, {headers:{'Accept':'application/json'}, cache:'no-store'});
+    if (!response.ok) throw new Error(response.status===404?'METAR service unavailable':`Weather service returned ${response.status}`);
+    const payload = await response.json();
+    if (requestId !== metarRequestSequence) return;
+    const rows = Array.isArray(payload) ? payload : (payload.results || []);
+    const byId = new Map(rows.map(item => [String(item.icaoId || item.station || '').toUpperCase(), item]));
+    renderMetarCard('metarDep', r.dep.icao, byId.get(r.dep.icao));
+    renderMetarCard('metarArr', r.arr.icao, byId.get(r.arr.icao));
+  } catch (error) {
+    if (requestId !== metarRequestSequence) return;
+    renderMetarCard('metarDep', r.dep.icao, null, error.message);
+    renderMetarCard('metarArr', r.arr.icao, null, error.message);
+  }
 }
 
 function renderResult(r){
@@ -799,24 +1006,51 @@ function renderResult(r){
 
     <div class="kv-grid">
       <div class="kv"><label>Aircraft to fly</label><div class="v amber">${r.ac.label}</div><div class="sm">${r.ac.cat} · cruise ${r.ac.cruiseKts} kt</div></div>
-      <div class="kv"><label>Scenery type</label><div class="v">${r.sceneryLabel}</div><div class="sm">tagged on both ends of route</div></div>
+      <div class="kv"><label>Scenery preference</label><div class="v">${r.sceneryLabel}</div><div class="sm">${r.sceneryMatchLabel}</div></div>
       <div class="kv"><label>Time of flight</label><div class="v green">${r.timeLabel}</div><div class="sm">depart ≈ ${r.depUTC} for local ${r.depLocalTarget}:00</div></div>
       <div class="kv"><label>Block time</label><div class="v">${fmtMin(r.flightMin)}</div><div class="sm">incl. taxi/climb/descent buffer</div></div>
+    </div>
+
+    <div class="section metar-section">
+      <h3>Live airport weather · METAR</h3>
+      <div class="metar-grid" id="metarGrid">
+        <div class="metar-card" id="metarDep"><div class="metar-card-head"><strong>🛫 ${r.dep.icao} · Departure</strong><span class="metar-status">Loading…</span></div><div class="sm">Fetching latest observation</div></div>
+        <div class="metar-card" id="metarArr"><div class="metar-card-head"><strong>🛬 ${r.arr.icao} · Arrival</strong><span class="metar-status">Loading…</span></div><div class="sm">Fetching latest observation</div></div>
+      </div>
     </div>
 
     <div class="section">
       <h3>Liveries possible on this route</h3>
       <div class="liveries">
-        ${r.ac.liveries.map(l=>`<div class="liv">${l}</div>`).join('')}
+        ${r.ac.liveries.map(l=>`<a class="liv" href="https://flightsim.to/search?query=${encodeURIComponent(`${r.ac.label} ${l} livery MSFS 2024`)}" target="_blank" rel="noopener noreferrer" title="Search Flightsim.to for ${l} liveries for ${r.ac.label}">${l} ↗</a>`).join('')}
+      </div>
+      <p class="sm livery-note">Each airline opens an aircraft-specific Flightsim.to search. Check the aircraft developer, exact variant and MSFS 2024 compatibility before downloading; these are search links, not guarantees that a matching repaint exists.</p>
+    </div>
+
+    <div class="section scenery-discovery">
+      <h3>Optional scenery discovery · Flightsim.to</h3>
+      <p class="sm">Find community-made scenery near these airports. The coordinates below are airport map references (latitude, longitude) — they are not scenery files, and the World Explorer link does not automatically zoom to them. Only uploads with creator-provided location data may appear on its map.</p>
+      <div class="scenery-points">
+        <div class="scenery-point">
+          <strong>🛫 ${r.dep.icao} · Departure</strong>
+          <span>${Number(r.dep.lat).toFixed(4)}, ${Number(r.dep.lon).toFixed(4)}</span>
+        </div>
+        <div class="scenery-point">
+          <strong>🛬 ${r.arr.icao} · Arrival</strong>
+          <span>${Number(r.arr.lat).toFixed(4)}, ${Number(r.arr.lon).toFixed(4)}</span>
+        </div>
+      </div>
+      <div class="linkbar">
+        <a href="https://map.flightsim.to/" target="_blank" rel="noopener noreferrer">Open World Explorer ↗</a>
+        <a href="https://www.flightsim.to/airports/" target="_blank" rel="noopener noreferrer">Browse airport scenery ↗</a>
       </div>
     </div>
 
     <div class="linkbar">
-      <a href="https://map.flightsim.to/?icao=${r.dep.icao}" target="_blank" rel="noopener">View ${r.dep.icao} on flightsim.to map ↗</a>
-      <a href="https://map.flightsim.to/?icao=${r.arr.icao}" target="_blank" rel="noopener">View ${r.arr.icao} on flightsim.to map ↗</a>
-      <a href="https://www.flightaware.com/live/airport/${r.dep.icao}" target="_blank" rel="noopener">${r.dep.icao} live traffic ↗</a>
+      <a href="https://www.flightaware.com/live/airport/${encodeURIComponent(r.dep.icao)}" target="_blank" rel="noopener noreferrer">${r.dep.icao} live traffic ↗</a>
     </div>
   `;
+  loadRouteMetars(r);
 }
 
 document.getElementById('dispatchBtn').onclick = ()=> runDispatch();
@@ -921,6 +1155,8 @@ function syncSimbriefFromLastRoute(){
     document.getElementById('sbDest').textContent = lastRoute.arr.icao;
     document.getElementById('sbOrigInput').value = lastRoute.dep.icao;
     document.getElementById('sbDestInput').value = lastRoute.arr.icao;
+    const routeType = DISPATCH_TO_SIMBRIEF[lastRoute.ac?.id];
+    if(routeType && [...document.getElementById('sbType').options].some(o=>o.value===routeType)) document.getElementById('sbType').value=routeType;
   } else {
     noRoute.style.display='block';
     strip.style.display='none';
@@ -959,7 +1195,7 @@ document.getElementById('sbGenerateBtn').onclick = ()=>{
   const dest = document.getElementById('sbDestInput').value.trim();
   const type = document.getElementById('sbType').value.trim();
   if(!orig || !dest || !type){
-    alert('Please fill in at least Origin, Destination, and Aircraft ICAO type code.');
+    alert('Please fill in Origin, Destination, and select an aircraft profile.');
     return;
   }
   const url = buildSimbriefUrl();
@@ -986,6 +1222,26 @@ loadAirports().then(out=>{
 });
 </script>
 
+  <script>
+  (() => {
+    const button = document.getElementById('themeToggle');
+    const saved = localStorage.getItem('fltplan-theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const applyTheme = (dark) => {
+      document.body.classList.toggle('dark-theme', dark);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111015' : '#f7f5fb');
+      button.innerHTML = dark ? '☀ <span>Light</span>' : '☾ <span>Dark</span>';
+      button.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+      button.setAttribute('aria-pressed', String(dark));
+    };
+    applyTheme(saved ? saved === 'dark' : prefersDark);
+    button.addEventListener('click', () => {
+      const dark = !document.body.classList.contains('dark-theme');
+      applyTheme(dark);
+      localStorage.setItem('fltplan-theme', dark ? 'dark' : 'light');
+    });
+  })();
+  </script>
   <script src="/msfs/static/dashboard-integration.js"></script>
 </body>
 </html>
