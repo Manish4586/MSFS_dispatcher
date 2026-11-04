@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#f7f5fb">
 <meta name="color-scheme" content="light dark">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Google+Sans+Text:wght@400;500;600;700&display=swap');
 
@@ -362,6 +363,39 @@ body.dark-theme .metar-category.mvfr{background:#514326;color:#f4d58a;}
 .airport-no-results{padding:12px;color:var(--paper-dim);font-size:12px;}
 @media(max-width:520px){.route-mode .chip{min-height:42px;padding:9px 13px;font-size:12px;}.airport-suggestions{max-height:230px;}}
 
+
+.map-live-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:#2e9d68;box-shadow:0 0 8px #2e9d68;vertical-align:middle;}
+.live-map-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);}
+.live-map-status,.live-map-meta{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--paper-dim);}
+.live-map-status{color:var(--green);font-weight:700;}
+.live-map-meta{flex-wrap:wrap;justify-content:flex-end;}
+.live-map-pulse{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.6s infinite;}
+#vatsimMap{height:min(68vh,680px);min-height:360px;width:100%;background:var(--panel-2);z-index:1;}
+.leaflet-container{font:12px 'Google Sans Text','Google Sans',sans-serif;background:var(--panel-2);}
+.leaflet-control-attribution{font-size:9px!important;}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--paper);}
+.leaflet-popup-content{margin:11px 13px;line-height:1.5;min-width:170px;}
+.leaflet-popup-content strong{color:var(--amber);}
+.live-map-legend{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;border-top:1px solid var(--line);font-size:10px;color:var(--paper-dim);}
+.live-map-legend>span:first-child{display:flex;align-items:center;gap:7px;color:var(--green);font-weight:600;}
+.legend-plane{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px color-mix(in srgb,var(--amber) 20%,transparent);}
+.live-pilots-wrap{border-top:1px solid var(--line);padding:14px 16px 16px;}
+.live-pilots-heading{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:var(--paper-dim);letter-spacing:.5px;margin-bottom:10px;}
+.live-pilots-heading span{font-weight:500;}
+.live-pilot-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;}
+.live-pilot-card{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2);color:var(--paper);cursor:pointer;text-align:left;}
+.live-pilot-card:hover{border-color:var(--amber-dim);background:var(--pixel-lavender);}
+.live-pilot-main{min-width:0;}
+.live-pilot-callsign{font-size:12px;font-weight:700;color:var(--amber);}
+.live-pilot-route{font-size:10px;color:var(--paper-dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.live-pilot-alt{font-size:10px;color:var(--green);white-space:nowrap;text-align:right;}
+.live-pilot-empty{grid-column:1/-1;padding:20px;text-align:center;color:var(--paper-dim);font-size:12px;border:1px dashed var(--line);border-radius:12px;}
+.vatsim-plane-marker{background:transparent;border:0;}
+.vatsim-plane-marker svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));}
+body.dark-theme .leaflet-control-zoom a{background:var(--panel);color:var(--paper);border-color:var(--line);}
+body.dark-theme .leaflet-bar{border-color:var(--line);}
+@media(max-width:600px){#vatsimMap{height:58vh;min-height:330px;}.live-map-toolbar{align-items:flex-start;}.live-map-meta{justify-content:flex-start;width:100%;}.live-map-legend{align-items:flex-start;flex-direction:column;}}
+
 </style>
 </head>
 <body>
@@ -381,6 +415,7 @@ body.dark-theme .metar-category.mvfr{background:#514326;color:#f4d58a;}
   <div class="tabbar">
     <button class="tabbtn active" data-tab="dispatch">Dispatcher</button>
     <button class="tabbtn" data-tab="simbrief">File to SimBrief</button>
+    <button class="tabbtn" data-tab="live-map">Live Map <span class="map-live-dot"></span></button>
   </div>
 
   <div id="tab-dispatch" class="tabpane active">
@@ -551,6 +586,22 @@ body.dark-theme .metar-category.mvfr{background:#514326;color:#f4d58a;}
     </div>
   </div>
   
+
+  <div id="tab-live-map" class="tabpane">
+    <div class="panel">
+      <div class="panel-hd"><span>Discord Community Radar</span><span class="n" id="vatsimPilotCount">0 online</span></div>
+      <div class="live-map-toolbar">
+        <div class="live-map-status"><span class="live-map-pulse"></span><span id="vatsimMapStatus">Connecting to VATSIM network…</span></div>
+        <div class="live-map-meta"><span id="vatsimUpdatedAt">Waiting for feed</span><span id="vatsimNextUpdate">Auto refresh · 15s</span></div>
+      </div>
+      <div id="vatsimMap" role="application" aria-label="Interactive map of registered VATSIM pilots"></div>
+      <div class="live-map-legend"><span><i class="legend-plane"></i> Registered pilot online</span><span>Aircraft positions update with the VATSIM data feed</span></div>
+      <div class="live-pilots-wrap">
+        <div class="live-pilots-heading">Registered pilots <span id="vatsimPilotListCount">0 online</span></div>
+        <div id="vatsimPilotList" class="live-pilot-list"><div class="live-pilot-empty">Loading registered pilots…</div></div>
+      </div>
+    </div>
+  </div>
 
   <div class="footer-note">Airport data is served locally by the FLTPLAN server (ICAO/lat/lon/elevation/type data). Scenery categories are geographic preferences computed from airport coordinates and reference heuristics; they never block route generation. Flightsim.to World Explorer is an optional community scenery discovery layer. Search history is kept in-memory for this session only (not saved to disk/browser storage). Cross-check map.flightsim.to before flying.</div>
   <footer class="site-footer" aria-label="Site footer">
@@ -1398,15 +1449,43 @@ function renderHistory(){
 renderHistory();
 
 
-document.querySelectorAll('.tabbtn').forEach(btn=>{
-  btn.onclick = ()=>{
-    document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='simbrief') syncSimbriefFromLastRoute();
-  };
+const FLTPLAN_TAB_STORAGE_KEY = 'fltplan:lastSelectedTab:v1';
+
+function activateFlplanTab(tabName, persist = true) {
+  const button = document.querySelector(`.tabbtn[data-tab="${tabName}"]`);
+  const pane = document.getElementById('tab-' + tabName);
+  if (!button || !pane) return false;
+
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tabpane').forEach(p => p.classList.remove('active'));
+  button.classList.add('active');
+  pane.classList.add('active');
+
+  if (persist) {
+    try { localStorage.setItem(FLTPLAN_TAB_STORAGE_KEY, tabName); } catch (_) {}
+  }
+  if (tabName === 'simbrief') syncSimbriefFromLastRoute();
+  return true;
+}
+
+document.querySelectorAll('.tabbtn').forEach(btn => {
+  btn.onclick = () => activateFlplanTab(btn.dataset.tab, true);
 });
+
+let fltplanSavedTab = 'dispatch';
+try {
+  fltplanSavedTab = localStorage.getItem(FLTPLAN_TAB_STORAGE_KEY) || 'dispatch';
+} catch (_) {}
+if (!activateFlplanTab(fltplanSavedTab, false)) {
+  activateFlplanTab('dispatch', false);
+}
+
+window.addEventListener('load', () => {
+  const active = document.querySelector('.tabbtn.active');
+  if (active?.dataset.tab === 'live-map') {
+    active.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }
+}, { once: true });
 
 
 let lastRoute = null; 
@@ -1497,6 +1576,7 @@ loadAirports().then(out=>{
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const applyTheme = (dark) => {
       document.body.classList.toggle('dark-theme', dark);
+      window.dispatchEvent(new CustomEvent('fltplan:themechange', {detail:{dark}}));
       document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111015' : '#f7f5fb');
       button.innerHTML = dark ? '☀ <span>Light</span>' : '☾ <span>Dark</span>';
       button.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
@@ -1510,6 +1590,8 @@ loadAirports().then(out=>{
     });
   })();
   </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/msfs/static/map.js?v=vatsim-radar-20261104"></script>
   <script src="/msfs/static/dashboard-integration.js?v=reroll-tdz-fixed-20261104"></script>
 </body>
 </html>
