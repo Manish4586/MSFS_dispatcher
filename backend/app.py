@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import math
 import asyncio, base64, csv, hashlib, hmac, io, json, os, secrets, tempfile, time, urllib.parse, xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ load_dotenv(BASE / '.env', override=False)
 DATA_DIR = Path(os.getenv('DATA_DIR', BASE / 'data'))
 DATA_FILE = DATA_DIR / 'records.json'
 AIRPORTS_FILE = Path(os.getenv('AIRPORTS_FILE', BASE / 'data' / 'airports.csv'))
+RUNWAYS_FILE = Path(os.getenv('RUNWAYS_FILE', BASE / 'data' / 'runways.csv'))
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN', '')
 GUILD_ID = int(os.getenv('DISCORD_GUILD_ID', '0') or '0')
@@ -40,6 +42,7 @@ VATSIM_CACHE_TTL = 12
 OAUTH_STATE_TTL_SECONDS = 600
 TTL_HOURS = 12
 _AIRPORT_CACHE: dict[str, dict[str, str]] | None = None
+_RUNWAY_CACHE: dict[tuple[int, int], list[dict[str, float | str]]] | None = None
 _METAR_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -539,6 +542,148 @@ async def _fetch_vatsim_feed(client: httpx.AsyncClient) -> dict[str, Any]:
     return feed
 
 
+def _parse_filed_altitude(value: Any) -> int | None:
+    if value is None:
+        return None
+    raw = str(value).strip().upper().replace(' ', '')
+    if not raw:
+        return None
+    match = re.fullmatch(r'(?:FL)?(\d{2,3})', raw)
+    if match and raw.startswith('FL'):
+        return int(match.group(1)) * 100
+    if raw.isdigit():
+        number = int(raw)
+        return number * 100 if number < 1000 else number
+    return None
+
+
+def _runway_spatial_index() -> dict[tuple[int, int], list[dict[str, float | str]]]:
+    global _RUNWAY_CACHE
+    if _RUNWAY_CACHE is None:
+        _RUNWAY_CACHE = {}
+        cell_size = 0.05
+        if RUNWAYS_FILE.is_file():
+            with RUNWAYS_FILE.open('r', encoding='utf-8-sig', newline='') as handle:
+                for row in csv.DictReader(handle):
+                    if str(row.get('closed') or '0').strip() == '1':
+                        continue
+                    try:
+                        le_lat = float(row['le_latitude_deg'])
+                        le_lon = float(row['le_longitude_deg'])
+                        he_lat = float(row['he_latitude_deg'])
+                        he_lon = float(row['he_longitude_deg'])
+                        le_elev = float(row['le_elevation_ft'])
+                        he_elev = float(row['he_elevation_ft'])
+                        width = float(row.get('width_ft') or 150)
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if not (-90 <= le_lat <= 90 and -90 <= he_lat <= 90 and
+                            -180 <= le_lon <= 180 and -180 <= he_lon <= 180):
+                        continue
+                    runway = {
+                        'le_lat': le_lat, 'le_lon': le_lon, 'he_lat': he_lat,
+                        'he_lon': he_lon, 'le_elev': le_elev, 'he_elev': he_elev,
+                        'width': max(10.0, width),
+                        'airport': str(row.get('airport_ident') or '').upper(),
+                        'surface': str(row.get('surface') or '')
+                    }
+                    lat_pad = 0.002
+                    mean_lat = math.radians((le_lat + he_lat) / 2)
+                    lon_pad = 0.002 / max(0.15, math.cos(mean_lat))
+                    min_y = math.floor((min(le_lat, he_lat) - lat_pad) / cell_size)
+                    max_y = math.floor((max(le_lat, he_lat) + lat_pad) / cell_size)
+                    min_x = math.floor((min(le_lon, he_lon) - lon_pad) / cell_size)
+                    max_x = math.floor((max(le_lon, he_lon) + lon_pad) / cell_size)
+                    for gy in range(min_y, max_y + 1):
+                        for gx in range(min_x, max_x + 1):
+                            _RUNWAY_CACHE.setdefault((gx, gy), []).append(runway)
+    return _RUNWAY_CACHE
+
+
+def _aircraft_ground_speed_limit(aircraft: str) -> float:
+    code = re.split(r'[/\s]', str(aircraft or '').upper())[0]
+    if code.startswith(('H', 'R')):
+        return 100.0
+    if code.startswith(('AT', 'DH', 'BE', 'C1', 'C2', 'PC', 'SF', 'JS')):
+        return 165.0
+    if code.startswith(('A', 'B', 'C', 'D', 'E', 'F', 'CRJ', 'MD', 'DC', 'IL')):
+        return 225.0
+    return 140.0
+
+
+def _runway_proximity(lat: float, lon: float, altitude: Any) -> dict[str, Any] | None:
+    try:
+        alt = float(altitude)
+    except (TypeError, ValueError):
+        return None
+    cell_size = 0.05
+    gx = math.floor(lon / cell_size)
+    gy = math.floor(lat / cell_size)
+    index = _runway_spatial_index()
+    candidates = []
+    seen = set()
+    for y in range(gy - 1, gy + 2):
+        for x in range(gx - 1, gx + 2):
+            for runway in index.get((x, y), []):
+                key = (runway['airport'], runway['le_lat'], runway['le_lon'], runway['he_lat'], runway['he_lon'])
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(runway)
+    best = None
+    for runway in candidates:
+        mean_lat = math.radians((lat + runway['le_lat'] + runway['he_lat']) / 3)
+        scale_x = 111320 * max(0.15, math.cos(mean_lat))
+        scale_y = 110540
+        ax = (runway['le_lon'] - lon) * scale_x
+        ay = (runway['le_lat'] - lat) * scale_y
+        bx = (runway['he_lon'] - lon) * scale_x
+        by = (runway['he_lat'] - lat) * scale_y
+        dx, dy = bx - ax, by - ay
+        denom = dx * dx + dy * dy
+        t = max(0.0, min(1.0, -(ax * dx + ay * dy) / denom)) if denom else 0.0
+        distance = math.hypot(ax + t * dx, ay + t * dy)
+        runway_half_width = max(15.0, runway['width'] * 0.3048 / 2)
+        elevation = runway['le_elev'] + (runway['he_elev'] - runway['le_elev']) * t
+        vertical_delta = abs(alt - elevation)
+        if distance <= runway_half_width + 35 and vertical_delta <= 180:
+            score = distance + vertical_delta * 0.35
+            if best is None or score < best['score']:
+                best = {'score': score, 'distance_m': distance, 'elevation_ft': elevation,
+                        'airport': runway['airport'], 'vertical_delta_ft': vertical_delta}
+    return best
+
+
+def _ground_candidate(lat: float, lon: float, altitude: Any, groundspeed: Any,
+                      aircraft: str) -> dict[str, Any] | None:
+    try:
+        speed = float(groundspeed)
+    except (TypeError, ValueError):
+        return None
+    if speed < 0 or speed > _aircraft_ground_speed_limit(aircraft):
+        return None
+    match = _runway_proximity(lat, lon, altitude)
+    if not match:
+        return None
+    match['speed_kt'] = speed
+    return match
+
+
+def _confirmed_ground(candidate: dict[str, Any] | None, previous: dict[str, Any] | None,
+                      aircraft: str) -> bool:
+    if not candidate:
+        return False
+    if previous and previous.get('on_ground'):
+        old_epoch = float(previous.get('epoch') or 0)
+        current_epoch = time.time()
+        if current_epoch - old_epoch <= 45:
+            return True
+    if previous and previous.get('ground_candidate'):
+        old_epoch = float(previous.get('epoch') or 0)
+        if time.time() - old_epoch <= 45:
+            return True
+    return False
+
+
 def _vatsim_session_id(pilot: dict[str, Any]) -> str:
     raw = str(pilot.get('logon_time') or pilot.get('callsign') or 'unknown')
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:20]
@@ -590,17 +735,35 @@ async def _store_vatsim_track(r: Redis, pilot: dict[str, Any]) -> None:
         'altitude': pilot.get('altitude'),
         'groundspeed': pilot.get('groundspeed'),
         'heading': pilot.get('heading'),
+        'transponder': pilot.get('transponder'),
+        'qnh_i_hg': pilot.get('qnh_i_hg'),
+        'qnh_mb': pilot.get('qnh_mb'),
     }
+    aircraft = str(fp.get('aircraft_short') or fp.get('aircraft') or '')
     last_raw = await r.lindex(track_key, 0)
+    previous_point = None
     if last_raw:
         try:
-            last = json.loads(last_raw)
+            previous_point = json.loads(last_raw)
+        except (ValueError, TypeError):
+            previous_point = None
+    candidate = _ground_candidate(float(lat), float(lon), pilot.get('altitude'),
+                                  pilot.get('groundspeed'), aircraft)
+    point['ground_candidate'] = bool(candidate)
+    point['ground_airport'] = candidate.get('airport') if candidate else None
+    point['on_ground'] = _confirmed_ground(candidate, previous_point, aircraft)
+    if last_raw:
+        try:
+            last = previous_point or json.loads(last_raw)
             previous_epoch = float(last.get('epoch') or 0)
             point['gap_before'] = bool(previous_epoch and point['epoch'] - previous_epoch > 45)
             point['gap_seconds'] = max(0, round(point['epoch'] - previous_epoch)) if point['gap_before'] else 0
             if last.get('lat') == point['lat'] and last.get('lon') == point['lon']:
-                meta = previous_meta | {'last_seen_epoch': time.time(), 'last_seen': point['ts']}
+                point['gap_before'] = last.get('gap_before', False)
+                point['gap_seconds'] = last.get('gap_seconds', 0)
                 pipe = r.pipeline()
+                pipe.lset(track_key, 0, json.dumps(point, separators=(',', ':')))
+                meta = previous_meta | {'last_seen_epoch': time.time(), 'last_seen': point['ts']}
                 pipe.set(meta_key or f'fltplan:vatsim:trackmeta:{cid}:{session_id}',
                          json.dumps(meta, separators=(',', ':')), ex=VATSIM_TRACK_TTL)
                 pipe.set(active_key, session_id, ex=VATSIM_TRACK_TTL)
@@ -674,7 +837,7 @@ async def _track_response(r: Redis, cid: str, pilot: dict[str, Any]) -> dict[str
     for raw in reversed(raw_points):
         try:
             point = json.loads(raw)
-            points.append({'latitude': point['lat'], 'longitude': point['lon'], 'timestamp': point.get('ts'), 'altitude': point.get('altitude'), 'groundspeed': point.get('groundspeed'), 'heading': point.get('heading'), 'gap_before': point.get('gap_before', False), 'gap_seconds': point.get('gap_seconds', 0)})
+            points.append({'latitude': point['lat'], 'longitude': point['lon'], 'timestamp': point.get('ts'), 'altitude': point.get('altitude'), 'groundspeed': point.get('groundspeed'), 'heading': point.get('heading'), 'on_ground': bool(point.get('on_ground')), 'ground_candidate': bool(point.get('ground_candidate')), 'ground_airport': point.get('ground_airport'), 'gap_before': point.get('gap_before', False), 'gap_seconds': point.get('gap_seconds', 0)})
         except (ValueError, TypeError, KeyError):
             continue
 
@@ -777,6 +940,12 @@ async def vatsim_registered(request: Request):
             'altitude': pilot.get('altitude'),
             'groundspeed': pilot.get('groundspeed'),
             'heading': pilot.get('heading'),
+            'on_ground': False,
+            'squawk': pilot.get('transponder') or fp.get('assigned_transponder') or '',
+            'transponder': pilot.get('transponder') or '',
+            'qnh_i_hg': pilot.get('qnh_i_hg'),
+            'qnh_mb': pilot.get('qnh_mb'),
+            'planned_altitude': _parse_filed_altitude(fp.get('altitude')),
             'aircraft': fp.get('aircraft_short') or fp.get('aircraft') or '',
             'departure': fp.get('departure') or '',
             'arrival': fp.get('arrival') or '',
@@ -786,6 +955,8 @@ async def vatsim_registered(request: Request):
             'logon_time': pilot.get('logon_time') or '',
         }
         pilot_data.update(await _track_response(r, cid, pilot_data))
+        if pilot_data.get('track'):
+            pilot_data['on_ground'] = bool(pilot_data['track'][-1].get('on_ground'))
         pilots.append(pilot_data)
     pilots.sort(key=lambda p: (p['callsign'] or p['cid']).casefold())
     return {
