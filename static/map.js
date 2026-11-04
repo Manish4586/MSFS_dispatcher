@@ -40,7 +40,7 @@
   function ensureMap() {
     if (map || !window.L || !$('vatsimMap')) return;
     map = L.map('vatsimMap', {worldCopyJump:true, preferCanvas:true, zoomControl:true})
-      .setView([22, 0], 2);
+      .setView([22.5, 79.0], 4);
     trackCanvas = L.canvas({padding:0.5});
     markerLayer = L.layerGroup().addTo(map);
     trackLayer = L.layerGroup().addTo(map);
@@ -98,6 +98,8 @@
       ${esc(p.name)}<br><span>${esc(fp)}</span><br>
       <span>${esc(p.aircraft || 'Aircraft unknown')} · ${Number(p.altitude || 0).toLocaleString()} ft</span><br>
       <span>${Number(p.groundspeed || 0)} kt GS · HDG ${Number(p.heading || 0)}°</span><br>
+      <span>Squawk ${esc(p.squawk || '—')}</span><br>
+      <span>QNH ${p.qnh_i_hg != null ? `${Number(p.qnh_i_hg).toFixed(2)} inHg` : (p.qnh_mb != null ? `${Number(p.qnh_mb)} hPa` : '—')}</span><br>
       <span>VATSIM CID ${esc(p.cid)}</span></div>`;
   }
 
@@ -114,7 +116,7 @@
       const route = p.departure && p.arrival ? `${esc(p.departure)} → ${esc(p.arrival)}` : 'No filed route';
       return `<button type="button" class="live-pilot-card" data-cid="${esc(p.cid)}">
         <span class="live-pilot-main"><span class="live-pilot-callsign">${esc(p.callsign || `CID ${p.cid}`)}</span>
-        <span class="live-pilot-route">${route} · ${esc(p.aircraft || 'Unknown aircraft')}</span></span>
+        <span class="live-pilot-route">${route} · ${esc(p.aircraft || 'Unknown aircraft')} · SQ ${esc(p.squawk || '—')}</span></span>
         <span class="live-pilot-alt">${Number(p.altitude || 0).toLocaleString()} ft<br>${Number(p.groundspeed || 0)} kt</span>
       </button>`;
     }).join('');
@@ -197,24 +199,70 @@
     }
   }
 
-  function altitudeColor(altitude) {
-    const ft = Math.max(0, Math.min(45000, Number(altitude) || 0));
+  function altitudeColor(altitude, plannedAltitude, verticalRate, onGround = false) {
+    const ft = Math.max(0, Number(altitude) || 0);
+    const planned = Number(plannedAltitude);
+    if (Number.isFinite(planned) && planned > 0 && ft >= planned + 2000) return '#ff2424';
+    if (Number.isFinite(verticalRate) && verticalRate <= -10000) return '#ff00d4';
+    if (onGround) return '#ffffff';
+
     const stops = [
-      [0, '#2563eb'], [5000, '#06b6d4'], [12000, '#22c55e'],
-      [22000, '#eab308'], [32000, '#f97316'], [40000, '#ef4444']
+      [100, '#ffffff'],
+      [500, '#ffe600'],
+      [2500, '#ffe600'],
+      [10000, '#00e51b'],
+      [20000, '#00dce8'],
+      [30000, '#075dff'],
+      [40000, '#9b00ff']
     ];
     for (let i = 1; i < stops.length; i++) {
       if (ft <= stops[i][0]) {
-        const [aAlt, aHex] = stops[i - 1];
-        const [bAlt, bHex] = stops[i];
-        const t = (ft - aAlt) / (bAlt - aAlt);
-        const a = [1, 3, 5].map(k => parseInt(aHex.slice(k, k + 2), 16));
-        const b = [1, 3, 5].map(k => parseInt(bHex.slice(k, k + 2), 16));
-        return '#' + a.map((v, n) => Math.round(v + (b[n] - v) * t).toString(16).padStart(2, '0')).join('');
+        const [lowAlt, lowHex] = stops[i - 1];
+        const [highAlt, highHex] = stops[i];
+        const t = (ft - lowAlt) / (highAlt - lowAlt);
+        const low = [1, 3, 5].map(k => parseInt(lowHex.slice(k, k + 2), 16));
+        const high = [1, 3, 5].map(k => parseInt(highHex.slice(k, k + 2), 16));
+        return '#' + low.map((v, n) =>
+          Math.round(v + (high[n] - v) * t).toString(16).padStart(2, '0')
+        ).join('');
       }
     }
-    return '#ef4444';
+    return '#9b00ff';
   }
+
+  function pointVerticalRate(previous, current) {
+    const a = Number(previous.altitude);
+    const b = Number(current.altitude);
+    const t1 = Date.parse(previous.timestamp || '');
+    const t2 = Date.parse(current.timestamp || '');
+    if (!Number.isFinite(a) || !Number.isFinite(b) ||
+        !Number.isFinite(t1) || !Number.isFinite(t2) || t2 <= t1) return null;
+    return (b - a) * 60000 / (t2 - t1);
+  }
+
+  function addAltitudeSegment(previous, current, pilot, plannedAltitude, dashed = false) {
+    const rate = pointVerticalRate(previous, current);
+    const midpointAltitude = (Number(previous.altitude || 0) + Number(current.altitude || 0)) / 2;
+    const confirmedGround = previous.onGround && current.onGround;
+    const color = altitudeColor(midpointAltitude, plannedAltitude, rate, confirmedGround);
+    L.polyline([[previous.lat, previous.lon], [current.lat, current.lon]], {
+      color,
+      weight: 3.2,
+      opacity: 1,
+      lineCap: 'round',
+      lineJoin: 'round',
+      smoothFactor: 1,
+      interactive: true,
+      dashArray: dashed ? '8 8' : null,
+      renderer: trackCanvas
+    }).bindPopup(
+      `<strong>${esc(pilot.callsign || `CID ${pilot.cid}`)}</strong><br>` +
+      `${esc(pilot.departure || '—')} → ${esc(pilot.arrival || '—')}<br>` +
+      `Altitude: ${Number.isFinite(midpointAltitude) ? Math.round(midpointAltitude).toLocaleString() + ' ft' : 'Unavailable'}` +
+      (rate === null ? '' : `<br>Vertical rate: ${Math.round(rate).toLocaleString()} fpm`)
+    ).addTo(trackLayer);
+  }
+
 
   function simplifyTrack(points, toleranceMeters = 220) {
     if (points.length < 3) return points;
@@ -259,59 +307,36 @@
           lon: Number(point.longitude),
           altitude: point.altitude == null ? NaN : Number(point.altitude),
           timestamp: point.timestamp,
+          onGround: Boolean(point.on_ground),
           gapBefore: Boolean(point.gap_before),
           gapSeconds: Number(point.gap_seconds || 0)
         }))
         .filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lon));
 
+      const plannedAltitude = Number(pilot.planned_altitude);
       if (points.length === 1) {
         const first = points[0];
-        L.circleMarker([first.lat, first.lon], {radius:3, color:altitudeColor(first.altitude),
-          weight:1, fillColor:altitudeColor(first.altitude), fillOpacity:1}).addTo(trackLayer);
+        const color = altitudeColor(first.altitude, plannedAltitude, null, first.onGround);
+        L.circleMarker([first.lat, first.lon], {
+          radius: 3, color, weight: 1, fillColor: color, fillOpacity: 1
+        }).addTo(trackLayer);
       }
 
-      let run = [];
-      let runBucket = null;
-      const flushRun = () => {
-        if (run.length < 2) { run = []; return; }
-        const simplified = simplifyTrack(run, 220);
-        const coords = simplified.map(p => [p.lat, p.lon]);
-        const altitude = run.reduce((sum,p) => sum + (Number.isFinite(p.altitude) ? p.altitude : 0), 0) / run.length;
-        const color = altitudeColor(altitude);
-        L.polyline(coords, {
-          color, weight:3.2, opacity:1, lineCap:'round', lineJoin:'round',
-          smoothFactor:1.5, interactive:true, renderer: trackCanvas
-        }).bindPopup(
-          `<strong>${esc(pilot.callsign || `CID ${pilot.cid}`)}</strong><br>` +
-          `${esc(pilot.departure || '—')} → ${esc(pilot.arrival || '—')}<br>` +
-          `Altitude: ${Number.isFinite(altitude) ? Math.round(altitude).toLocaleString() + ' ft' : 'Unavailable'}`
-        ).addTo(trackLayer);
-        run = [];
-      };
-      for (let i = 0; i < points.length; i++) {
-        const point = points[i];
-        if (i === 0) { run = [point]; runBucket = Math.round((point.altitude || 0) / 1000); continue; }
-        if (point.gapBefore) {
-          flushRun();
-          const prev = points[i - 1];
-          L.polyline([[prev.lat,prev.lon],[point.lat,point.lon]], {
-            color: altitudeColor(point.altitude), weight:3, opacity:.9,
-            dashArray:'8 8', lineCap:'round', lineJoin:'round', renderer:trackCanvas
-          }).bindPopup(`Telemetry gap: ${Number(point.gapSeconds).toLocaleString()} sec · reconnect continued`).addTo(trackLayer);
-          run = [point]; runBucket = Math.round((point.altitude || 0) / 1000);
+      for (let i = 1; i < points.length; i++) {
+        const previous = points[i - 1];
+        const current = points[i];
+        if (current.gapBefore) {
+          L.polyline([[previous.lat, previous.lon], [current.lat, current.lon]], {
+            color: altitudeColor(current.altitude, plannedAltitude, null, current.onGround),
+            weight: 3, opacity: .9, dashArray: '8 8',
+            lineCap: 'round', lineJoin: 'round', renderer: trackCanvas
+          }).bindPopup(
+            `Telemetry gap: ${Number(current.gapSeconds).toLocaleString()} sec · reconnect continued`
+          ).addTo(trackLayer);
           continue;
         }
-        const bucket = Math.round((point.altitude || 0) / 1000);
-        if (bucket !== runBucket && run.length > 1) {
-          const previous = run[run.length - 1];
-          flushRun();
-          run = [previous, point];
-        } else {
-          run.push(point);
-        }
-        runBucket = bucket;
+        addAltitudeSegment(previous, current, pilot, plannedAltitude);
       }
-      flushRun();
 
       for (const [kind, airport] of [
         ['Departure', pilot.departure_airport],
@@ -366,7 +391,7 @@
       }
       renderFlightTracks(pilots);
       renderPilotList(pilots);
-      if ($('vatsimPilotCount')) $('vatsimPilotCount').textContent = `${data.online_count || 0} registered online`;
+      if ($('vatsimPilotCount')) $('vatsimPilotCount').textContent = `${data.online_count || 0} online`;
       if ($('vatsimPilotListCount')) $('vatsimPilotListCount').textContent = `${data.online_count || 0} online`;
       if ($('vatsimUpdatedAt')) $('vatsimUpdatedAt').textContent = formatTimestamp(data.updated_at);
       if ($('vatsimMapStatus')) $('vatsimMapStatus').textContent = pilots.length ? 'VATSIM network connected' : 'Feed connected · no registered pilots online';
