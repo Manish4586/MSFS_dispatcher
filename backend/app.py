@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-import asyncio, base64, csv, hashlib, hmac, io, json, os, secrets, tempfile, urllib.parse, xml.etree.ElementTree as ET
+import asyncio, base64, csv, hashlib, hmac, io, json, os, secrets, tempfile, time, urllib.parse, xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -34,6 +34,9 @@ DASHBOARD_URL = os.getenv('DASHBOARD_URL', '/msfs/')
 SESSION_COOKIE_NAME = os.getenv('SESSION_COOKIE_NAME', 'fltplan_session')
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() in ('1','true','yes','on')
 SESSION_TTL_SECONDS = int(os.getenv('SESSION_TTL_SECONDS', '43200'))
+VATSIM_DATA_URL = 'https://data.vatsim.net/v3/vatsim-data.json'
+VATSIM_CACHE_KEY = 'fltplan:vatsim:datafeed'
+VATSIM_CACHE_TTL = 12
 OAUTH_STATE_TTL_SECONDS = 600
 TTL_HOURS = 12
 _AIRPORT_CACHE: dict[str, dict[str, str]] | None = None
@@ -520,6 +523,317 @@ async def save_search(route: Route, request: Request):
     return {'ok': True, 'record': item}
 
 
+
+
+VATSIM_TRACK_INTERVAL = 15
+VATSIM_TRACK_TTL = 30 * 24 * 60 * 60
+VATSIM_TRACK_MAX_POINTS = 12000
+
+
+async def _fetch_vatsim_feed(client: httpx.AsyncClient) -> dict[str, Any]:
+    response = await client.get(VATSIM_DATA_URL)
+    response.raise_for_status()
+    feed = response.json()
+    if not isinstance(feed, dict) or not isinstance(feed.get('pilots'), list):
+        raise ValueError('Unexpected VATSIM data feed structure')
+    return feed
+
+
+def _vatsim_session_id(pilot: dict[str, Any]) -> str:
+    raw = str(pilot.get('logon_time') or pilot.get('callsign') or 'unknown')
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:20]
+
+
+async def _store_vatsim_track(r: Redis, pilot: dict[str, Any]) -> None:
+    cid = str(pilot.get('cid') or '')
+    lat, lon = pilot.get('latitude'), pilot.get('longitude')
+    if not cid.isdigit() or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return
+
+    fp = pilot.get('flight_plan') or {}
+    callsign = str(pilot.get('callsign') or '').strip().upper()
+    departure = str(fp.get('departure') or '').strip().upper()
+    arrival = str(fp.get('arrival') or '').strip().upper()
+    active_key = f'fltplan:vatsim:track:active:{cid}'
+    session_id = await r.get(active_key)
+    meta_key = f'fltplan:vatsim:trackmeta:{cid}:{session_id}' if session_id else ''
+    previous_meta = {}
+    if meta_key:
+        try:
+            previous_meta = json.loads(await r.get(meta_key) or '{}')
+        except (ValueError, TypeError):
+            previous_meta = {}
+
+    same_flight = (
+        session_id
+        and previous_meta.get('callsign', '').upper() == callsign
+        and previous_meta.get('departure', '').upper() == departure
+        and previous_meta.get('arrival', '').upper() == arrival
+        and time.time() - float(previous_meta.get('last_seen_epoch') or 0) <= 7200
+    )
+    if not same_flight:
+        session_id = _vatsim_session_id(pilot)
+        if await r.exists(f'fltplan:vatsim:track:{cid}:{session_id}'):
+            session_id = hashlib.sha256(
+                f'{cid}:{pilot.get("logon_time")}:{time.time_ns()}'.encode()
+            ).hexdigest()[:20]
+        await r.set(active_key, session_id, ex=VATSIM_TRACK_TTL)
+
+    track_key = f'fltplan:vatsim:track:{cid}:{session_id}'
+    point = {
+        'lat': round(float(lat), 6),
+        'lon': round(float(lon), 6),
+        'ts': now_iso(),
+        'epoch': time.time(),
+        'altitude': pilot.get('altitude'),
+        'groundspeed': pilot.get('groundspeed'),
+        'heading': pilot.get('heading'),
+    }
+    last_raw = await r.lindex(track_key, 0)
+    if last_raw:
+        try:
+            last = json.loads(last_raw)
+            previous_epoch = float(last.get('epoch') or 0)
+            point['gap_before'] = bool(previous_epoch and point['epoch'] - previous_epoch > 45)
+            point['gap_seconds'] = max(0, round(point['epoch'] - previous_epoch)) if point['gap_before'] else 0
+            if last.get('lat') == point['lat'] and last.get('lon') == point['lon']:
+                meta = previous_meta | {'last_seen_epoch': time.time(), 'last_seen': point['ts']}
+                pipe = r.pipeline()
+                pipe.set(meta_key or f'fltplan:vatsim:trackmeta:{cid}:{session_id}',
+                         json.dumps(meta, separators=(',', ':')), ex=VATSIM_TRACK_TTL)
+                pipe.set(active_key, session_id, ex=VATSIM_TRACK_TTL)
+                await pipe.execute()
+                return
+        except (ValueError, TypeError):
+            pass
+
+    meta = {
+        'cid': cid,
+        'callsign': callsign,
+        'name': pilot.get('name') or '',
+        'departure': departure,
+        'arrival': arrival,
+        'aircraft': str(fp.get('aircraft_short') or fp.get('aircraft') or ''),
+        'logon_time': pilot.get('logon_time') or '',
+        'session_id': session_id,
+        'last_seen_epoch': time.time(),
+        'last_seen': point['ts'],
+        'reconnected': bool(same_flight and previous_meta.get('logon_time') != pilot.get('logon_time')),
+    }
+    pipe = r.pipeline()
+    pipe.lpush(track_key, json.dumps(point, separators=(',', ':')))
+    pipe.ltrim(track_key, 0, VATSIM_TRACK_MAX_POINTS - 1)
+    pipe.expire(track_key, VATSIM_TRACK_TTL)
+    pipe.set(f'fltplan:vatsim:trackmeta:{cid}:{session_id}',
+             json.dumps(meta, separators=(',', ':')), ex=VATSIM_TRACK_TTL)
+    pipe.set(active_key, session_id, ex=VATSIM_TRACK_TTL)
+    sessions_key = f'fltplan:vatsim:track:sessions:{cid}'
+    pipe.zadd(sessions_key, {session_id: time.time()})
+    pipe.expire(sessions_key, VATSIM_TRACK_TTL)
+    await pipe.execute()
+
+
+async def vatsim_tracker_loop():
+    """Collect registered pilots continuously, independent of dashboard/browser activity."""
+    headers = {'User-Agent': 'FLTPLAN-Dispatch/2.1 (VATSIM flight history collector)'}
+    async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+        while True:
+            try:
+                r = redis_required()
+                registrations = await r.hgetall('fltplan:vatsim:members')
+                if registrations:
+                    feed = await _fetch_vatsim_feed(client)
+                    await r.set(VATSIM_CACHE_KEY, json.dumps(feed, separators=(',', ':')), ex=VATSIM_CACHE_TTL)
+                    await r.set('fltplan:vatsim:last_good', json.dumps(feed, separators=(',', ':')), ex=300)
+                    registered = {str(cid) for cid in registrations.values()}
+                    for pilot in feed.get('pilots', []):
+                        if str(pilot.get('cid') or '') in registered:
+                            await _store_vatsim_track(r, pilot)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f'VATSIM history collector warning: {type(exc).__name__}: {exc}')
+            await asyncio.sleep(VATSIM_TRACK_INTERVAL)
+
+
+
+async def _track_response(r: Redis, cid: str, pilot: dict[str, Any]) -> dict[str, Any]:
+    session_id = await r.get(f'fltplan:vatsim:track:active:{cid}')
+    if not session_id:
+        return {'track': [], 'departure_airport': None, 'arrival_airport': None}
+    track_key = f'fltplan:vatsim:track:{cid}:{session_id}'
+    meta_raw = await r.get(f'fltplan:vatsim:trackmeta:{cid}:{session_id}')
+    try:
+        meta = json.loads(meta_raw) if meta_raw else {}
+    except (ValueError, TypeError):
+        meta = {}
+    raw_points = await r.lrange(track_key, 0, VATSIM_TRACK_MAX_POINTS - 1)
+    points = []
+    for raw in reversed(raw_points):
+        try:
+            point = json.loads(raw)
+            points.append({'latitude': point['lat'], 'longitude': point['lon'], 'timestamp': point.get('ts'), 'altitude': point.get('altitude'), 'groundspeed': point.get('groundspeed'), 'heading': point.get('heading'), 'gap_before': point.get('gap_before', False), 'gap_seconds': point.get('gap_seconds', 0)})
+        except (ValueError, TypeError, KeyError):
+            continue
+
+    dep_code = (meta.get('departure') or pilot.get('departure') or '').upper()
+    arr_code = (meta.get('arrival') or pilot.get('arrival') or '').upper()
+    def airport_point(code: str):
+        row = airport_lookup(code) if code else None
+        if not row:
+            return None
+        try:
+            return {'code': code, 'name': row.get('name') or code,
+                    'latitude': float(row['latitude_deg']), 'longitude': float(row['longitude_deg'])}
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    aircraft_code = re.split(r'[/\\s]', str(meta.get('aircraft') or pilot.get('aircraft') or '').upper())[0]
+    vertical_rate_fpm = None
+    if len(points) >= 2:
+        first, last = points[-2], points[-1]
+        try:
+            seconds = (datetime.fromisoformat(last['timestamp'].replace('Z', '+00:00')) -
+                       datetime.fromisoformat(first['timestamp'].replace('Z', '+00:00'))).total_seconds()
+            if seconds > 0 and first.get('altitude') is not None and last.get('altitude') is not None:
+                vertical_rate_fpm = round((float(last['altitude']) - float(first['altitude'])) * 60 / seconds)
+        except (ValueError, TypeError, KeyError):
+            pass
+    phase = 'Unknown'
+    if vertical_rate_fpm is not None:
+        if vertical_rate_fpm > 300: phase = 'Climbing'
+        elif vertical_rate_fpm < -300: phase = 'Descending'
+        else: phase = 'Cruise / level'
+    return {
+        'track': points,
+        'aircraft_code': aircraft_code,
+        'vertical_rate_fpm': vertical_rate_fpm,
+        'flight_phase': phase,
+        'session_id': session_id,
+        'track_points': len(points),
+        'departure_airport': airport_point(dep_code),
+        'arrival_airport': airport_point(arr_code),
+        'track_started_at': points[0]['timestamp'] if points else None,
+    }
+
+
+@app.get('/api/vatsim/registered')
+async def vatsim_registered(request: Request):
+    r = redis_required()
+    await rate_limit(f'fltplan:ratelimit:vatsim-map:{client_ip(request)}', 40, 60)
+    registrations = await r.hgetall('fltplan:vatsim:members')
+    if not registrations:
+        return {'updated_at': None, 'fetched_at': None, 'registered_count': 0,
+                'online_count': 0, 'pilots': []}
+
+    raw = await r.get(VATSIM_CACHE_KEY)
+    feed = None
+    if raw:
+        try:
+            feed = json.loads(raw)
+        except (ValueError, TypeError):
+            feed = None
+
+    if feed is None:
+        try:
+            async with httpx.AsyncClient(timeout=12, headers={'User-Agent': 'FLTPLAN-Dispatch/2.1 (VATSIM community radar)'}) as client:
+                response = await client.get(VATSIM_DATA_URL)
+                response.raise_for_status()
+                feed = response.json()
+            if not isinstance(feed, dict) or not isinstance(feed.get('pilots'), list):
+                raise ValueError('Unexpected VATSIM data feed structure')
+            await r.set(VATSIM_CACHE_KEY, json.dumps(feed, separators=(',', ':')), ex=VATSIM_CACHE_TTL)
+            await r.set('fltplan:vatsim:last_good', json.dumps(feed, separators=(',', ':')), ex=300)
+        except (httpx.HTTPError, ValueError) as exc:
+            stale = await r.get('fltplan:vatsim:last_good')
+            if stale:
+                try:
+                    feed = json.loads(stale)
+                except (ValueError, TypeError):
+                    feed = None
+            if feed is None:
+                raise HTTPException(status_code=502, detail='VATSIM live data is temporarily unavailable') from exc
+
+    registered = {str(cid): True for cid in registrations.values()}
+    pilots = []
+    for pilot in feed.get('pilots', []):
+        cid = str(pilot.get('cid', ''))
+        if cid not in registered:
+            continue
+        lat, lon = pilot.get('latitude'), pilot.get('longitude')
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+        fp = pilot.get('flight_plan') or {}
+        pilot_data = {
+            'cid': cid,
+            'name': pilot.get('name') or '',
+            'callsign': pilot.get('callsign') or '',
+            'latitude': lat,
+            'longitude': lon,
+            'altitude': pilot.get('altitude'),
+            'groundspeed': pilot.get('groundspeed'),
+            'heading': pilot.get('heading'),
+            'aircraft': fp.get('aircraft_short') or fp.get('aircraft') or '',
+            'departure': fp.get('departure') or '',
+            'arrival': fp.get('arrival') or '',
+            'flight_rules': fp.get('flight_rules') or '',
+            'route': fp.get('route') or '',
+            'last_updated': pilot.get('last_updated') or '',
+            'logon_time': pilot.get('logon_time') or '',
+        }
+        pilot_data.update(await _track_response(r, cid, pilot_data))
+        pilots.append(pilot_data)
+    pilots.sort(key=lambda p: (p['callsign'] or p['cid']).casefold())
+    return {
+        'updated_at': (feed.get('general') or {}).get('update_timestamp') or (feed.get('general') or {}).get('update') or None,
+        'fetched_at': now_iso(),
+        'registered_count': len(registrations),
+        'online_count': len(pilots),
+        'pilots': pilots,
+    }
+
+
+@app.get('/api/vatsim/history/{cid}')
+async def vatsim_flight_history(cid: str, request: Request,
+                                session_id: str | None = Query(default=None, max_length=40)):
+    r = redis_required()
+    if not re.fullmatch(r'\d{1,9}', cid):
+        raise HTTPException(status_code=400, detail='Invalid VATSIM CID')
+    await rate_limit(f'fltplan:ratelimit:vatsim-history:{client_ip(request)}', 30, 60)
+    registrations = await r.hgetall('fltplan:vatsim:members')
+    if cid not in {str(value) for value in registrations.values()}:
+        raise HTTPException(status_code=404, detail='VATSIM CID is not registered')
+    sessions = await r.zrevrange(f'fltplan:vatsim:track:sessions:{cid}', 0, 99)
+    if session_id:
+        if session_id not in sessions:
+            raise HTTPException(status_code=404, detail='Flight history session not found')
+        selected = [session_id]
+    else:
+        selected = sessions
+
+    history = []
+    for sid in selected:
+        meta_raw = await r.get(f'fltplan:vatsim:trackmeta:{cid}:{sid}')
+        try:
+            meta = json.loads(meta_raw) if meta_raw else {}
+        except (ValueError, TypeError):
+            meta = {}
+        raw_points = await r.lrange(f'fltplan:vatsim:track:{cid}:{sid}', 0, VATSIM_TRACK_MAX_POINTS - 1)
+        points = []
+        for raw in reversed(raw_points):
+            try:
+                p = json.loads(raw)
+                points.append({'latitude': p['lat'], 'longitude': p['lon'], 'timestamp': p.get('ts')})
+            except (ValueError, TypeError, KeyError):
+                continue
+        history.append({**meta, 'track_points': len(points), 'track': points})
+    return {'cid': cid, 'sessions': history, 'retention_days': 30}
+
+
 class DispatchBot(commands.Bot):
     async def setup_hook(self):
         if GUILD_ID:
@@ -532,6 +846,112 @@ class DispatchBot(commands.Bot):
 
 intents = discord.Intents.default()
 bot = DispatchBot(command_prefix='!', intents=intents)
+
+@bot.tree.command(name='register', description='Register your VATSIM CID for the FLTPLAN live map')
+@app_commands.describe(vatsim_id='Your numeric VATSIM CID')
+async def register_vatsim(interaction: discord.Interaction, vatsim_id: str):
+    cid = vatsim_id.strip()
+    if not re.fullmatch(r'\d{1,9}', cid):
+        await interaction.response.send_message('Enter your numeric VATSIM CID (digits only).', ephemeral=True)
+        return
+    cid = str(int(cid))
+    if redis is None:
+        await interaction.response.send_message('Redis is not connected. Please try again later.', ephemeral=True)
+        return
+    await rate_limit(f'fltplan:ratelimit:vatsim-register:{interaction.user.id}', 5, 3600)
+    owner = await redis.hget('fltplan:vatsim:cid_owners', cid)
+    if owner and owner != str(interaction.user.id):
+        await interaction.response.send_message('That VATSIM CID is already registered to another Discord account.', ephemeral=True)
+        return
+    old_cid = await redis.hget('fltplan:vatsim:members', str(interaction.user.id))
+    if old_cid and old_cid != cid:
+        await redis.hdel('fltplan:vatsim:cid_owners', old_cid)
+    await redis.hset('fltplan:vatsim:members', str(interaction.user.id), cid)
+    await redis.hset('fltplan:vatsim:cid_owners', cid, str(interaction.user.id))
+    await audit('vatsim_cid_registered', discord_user_id=str(interaction.user.id), vatsim_cid=cid, guild_id=str(interaction.guild_id or ''))
+    await interaction.response.send_message(
+        f'Your VATSIM CID **{cid}** is registered. When you are connected as a pilot, your aircraft will appear on the FLTPLAN Live Map. No dashboard Discord login is required.',
+        ephemeral=True
+    )
+
+
+@bot.tree.command(name='unregister', description='Remove your VATSIM CID from the FLTPLAN live map')
+async def unregister_vatsim(interaction: discord.Interaction):
+    if redis is None:
+        await interaction.response.send_message('Redis is not connected. Please try again later.', ephemeral=True)
+        return
+    user_id = str(interaction.user.id)
+    cid = await redis.hget('fltplan:vatsim:members', user_id)
+    if not cid:
+        await interaction.response.send_message('You do not have a VATSIM CID registered.', ephemeral=True)
+        return
+    await redis.hdel('fltplan:vatsim:members', user_id)
+    await redis.hdel('fltplan:vatsim:cid_owners', cid)
+    await audit('vatsim_cid_unregistered', discord_user_id=user_id, vatsim_cid=cid)
+    await interaction.response.send_message('Your VATSIM CID has been removed from the FLTPLAN Live Map.', ephemeral=True)
+
+
+class RegisteredListView(discord.ui.View):
+    """Ephemeral, paginated view of all VATSIM CID registrations."""
+    def __init__(self, entries: list[tuple[str, str]], requester_id: int):
+        super().__init__(timeout=180)
+        self.entries = entries
+        self.requester_id = requester_id
+        self.page = 0
+        self.page_size = 15
+        self.total_pages = max(1, (len(entries) + self.page_size - 1) // self.page_size)
+        self._sync_buttons()
+
+    def make_embed(self) -> discord.Embed:
+        start = self.page * self.page_size
+        page_entries = self.entries[start:start + self.page_size]
+        lines = [f"**{start + i + 1}.** <@{user_id}> — CID `{cid}`"
+                 for i, (user_id, cid) in enumerate(page_entries)]
+        embed = discord.Embed(
+            title='FLTPLAN — Registered VATSIM Pilots',
+            description='\n'.join(lines) if lines else 'No VATSIM CIDs are registered.',
+            colour=discord.Colour.blurple(),
+        )
+        embed.set_footer(text=f'{len(self.entries)} registered • Page {self.page + 1}/{self.total_pages}')
+        return embed
+
+    def _sync_buttons(self):
+        self.previous_button.disabled = self.page <= 0
+        self.next_button.disabled = self.page >= self.total_pages - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message('Only the person who opened this list can change its page.', ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label='Previous', style=discord.ButtonStyle.secondary, emoji='◀')
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+    @discord.ui.button(label='Next', style=discord.ButtonStyle.secondary, emoji='▶')
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.total_pages - 1, self.page + 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+
+@bot.tree.command(name='registeredlist', description='Show all VATSIM CIDs registered with FLTPLAN')
+async def registeredlist(interaction: discord.Interaction):
+    if redis is None:
+        await interaction.response.send_message('Redis is not connected. Please try again later.', ephemeral=True)
+        return
+    registrations = await redis.hgetall('fltplan:vatsim:members')
+    entries = sorted(
+        ((str(user_id), str(cid)) for user_id, cid in registrations.items()),
+        key=lambda item: (int(item[1]) if item[1].isdigit() else 0, item[0]),
+    )
+    view = RegisteredListView(entries, interaction.user.id)
+    await interaction.response.send_message(embed=view.make_embed(), view=view, ephemeral=True)
+
+
 msfs_group = app_commands.Group(name='msfs', description='MSFS dispatch configuration')
 
 
@@ -793,6 +1213,7 @@ async def main():
     tasks = [
         asyncio.create_task(server.serve(), name='fastapi'),
         asyncio.create_task(maintenance_loop(), name='maintenance'),
+        asyncio.create_task(vatsim_tracker_loop(), name='vatsim-history'),
         asyncio.create_task(discord_worker(), name='discord'),
     ]
 
