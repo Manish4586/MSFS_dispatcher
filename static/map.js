@@ -2,6 +2,7 @@
   'use strict';
 
   const API = '/msfs/api/vatsim/registered';
+  const HISTORY_API = '/msfs/api/vatsim/history';
   const REFRESH_MS = 15000;
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -12,6 +13,10 @@
   let tileLayer = null;
   let markerLayer = null;
   let trackLayer = null;
+  let historyLayer = null;
+  let historyLoaded = false;
+  let historyBusy = false;
+  let historicalViewActive = false;
   let markers = new Map();
   let lastFeedUpdate = null;
   let timer = null;
@@ -44,6 +49,7 @@
     trackCanvas = L.canvas({padding:0.5});
     markerLayer = L.layerGroup().addTo(map);
     trackLayer = L.layerGroup().addTo(map);
+    historyLayer = L.layerGroup().addTo(map);
     setTiles();
     setTimeout(() => map && map.invalidateSize(), 100);
   }
@@ -121,9 +127,14 @@
       </button>`;
     }).join('');
     list.querySelectorAll('[data-cid]').forEach(button => {
+      button.classList.toggle('is-selected', String(button.dataset.cid) === selectedCid);
+      button.setAttribute('aria-pressed', String(button.dataset.cid) === selectedCid ? 'true' : 'false');
       button.addEventListener('click', () => {
         const marker = markers.get(String(button.dataset.cid));
         if (marker && map) {
+          historicalViewActive = false;
+          if (historyLayer) historyLayer.clearLayers();
+          document.querySelectorAll('.history-flight-card.is-selected').forEach(card => card.classList.remove('is-selected'));
           selectedCid = String(button.dataset.cid);
           list.querySelectorAll('[data-cid]').forEach(card => {
             card.classList.toggle('is-selected', card === button);
@@ -360,6 +371,117 @@
     }
   }
 
+  function historyDate(value) {
+    if (!value) return 'Time unavailable';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) :
+      date.toLocaleString([], {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'});
+  }
+
+  function renderHistoricalFlights(pilots) {
+    const list = $('vatsimHistoryList');
+    const count = $('vatsimHistoryCount');
+    if (!list) return;
+    const sessions = [];
+    for (const pilot of pilots || []) {
+      for (const session of pilot.sessions || []) {
+        sessions.push({pilot, session});
+      }
+    }
+    if (count) count.textContent = `${sessions.length} flights · 30 days`;
+    if (!sessions.length) {
+      list.innerHTML = '<div class="live-pilot-empty">No stored flight history yet. Registered pilots appear here after the tracker records a flight.</div>';
+      return;
+    }
+    list.innerHTML = sessions.map(({pilot, session}, index) => {
+      const route = session.departure && session.arrival
+        ? `${esc(session.departure)} → ${esc(session.arrival)}` : 'Route unavailable';
+      const aircraft = session.aircraft ? ` · ${esc(session.aircraft)}` : '';
+      const points = Number(session.track_points || (session.track || []).length);
+      return `<button type="button" class="history-flight-card" data-history-index="${index}">
+        <span class="history-flight-main">
+          <strong>${esc(session.callsign || pilot.callsign || `CID ${pilot.cid}`)}</strong>
+          <span>${route}${aircraft}</span>
+          <small>${historyDate(session.started_at || session.logon_time)} · ${points.toLocaleString()} positions</small>
+        </span>
+        <span class="history-flight-state">HISTORY</span>
+      </button>`;
+    }).join('');
+    list.querySelectorAll('[data-history-index]').forEach(button => {
+      button.addEventListener('click', () => {
+        const item = sessions[Number(button.dataset.historyIndex)];
+        if (item) showHistoricalFlight(item.pilot, item.session, button);
+      });
+    });
+  }
+
+  function showHistoricalFlight(pilot, session, selectedButton) {
+    if (!map || !historyLayer) return;
+    historicalViewActive = true;
+    selectedCid = null;
+    document.querySelectorAll('.live-pilot-card.is-selected').forEach(card => {
+      card.classList.remove('is-selected');
+      card.setAttribute('aria-pressed', 'false');
+    });
+    historyLayer.clearLayers();
+    const points = (session.track || []).map(point => ({
+      lat: Number(point.latitude), lon: Number(point.longitude),
+      altitude: point.altitude == null ? NaN : Number(point.altitude),
+      timestamp: point.timestamp, onGround: Boolean(point.on_ground),
+      gapBefore: Boolean(point.gap_before), gapSeconds: Number(point.gap_seconds || 0)
+    })).filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+    if (!points.length) return;
+    const name = session.callsign || pilot.callsign || `CID ${pilot.cid}`;
+    for (let i = 1; i < points.length; i++) {
+      const previous = points[i - 1], current = points[i];
+      const rate = pointVerticalRate(previous, current);
+      const altitude = (Number(previous.altitude || 0) + Number(current.altitude || 0)) / 2;
+      const color = altitudeColor(altitude, NaN, rate, previous.onGround && current.onGround);
+      L.polyline([[previous.lat, previous.lon], [current.lat, current.lon]], {
+        color, weight: 4, opacity: .9, lineCap: 'round', lineJoin: 'round',
+        dashArray: current.gapBefore ? '8 8' : null, renderer: trackCanvas
+      }).bindPopup(
+        `<strong>${esc(name)} · Historical flight</strong><br>` +
+        `${esc(session.departure || '—')} → ${esc(session.arrival || '—')}<br>` +
+        `${historyDate(current.timestamp)}<br>` +
+        `Altitude: ${Number.isFinite(altitude) ? Math.round(altitude).toLocaleString() + ' ft' : 'Unavailable'}` +
+        (rate === null ? '' : `<br>Vertical rate: ${Math.round(rate).toLocaleString()} fpm`)
+      ).addTo(historyLayer);
+    }
+    if (points.length === 1) {
+      L.circleMarker([points[0].lat, points[0].lon], {
+        radius: 5, color: '#7c5ce7', weight: 2, fillOpacity: .8
+      }).addTo(historyLayer);
+    }
+    const bounds = L.latLngBounds(points.map(point => [point.lat, point.lon]));
+    map.fitBounds(bounds, {padding:[45,45], maxZoom:8});
+    const list = $('vatsimHistoryList');
+    if (list) {
+      list.querySelectorAll('.history-flight-card').forEach(card => {
+        card.classList.toggle('is-selected', card === selectedButton);
+      });
+    }
+    if ($('vatsimMapStatus')) $('vatsimMapStatus').textContent =
+      `Historical flight · ${name} · ${points.length.toLocaleString()} positions`;
+  }
+
+  async function refreshHistory(force = false) {
+    if (historyBusy || (!force && historyLoaded)) return;
+    historyBusy = true;
+    try {
+      const response = await fetch(HISTORY_API, {cache:'no-store', credentials:'same-origin'});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      renderHistoricalFlights(data.pilots || []);
+      historyLoaded = true;
+    } catch (error) {
+      const list = $('vatsimHistoryList');
+      if (list) list.innerHTML = `<div class="live-pilot-empty">Flight history unavailable · ${esc(error.message)}</div>`;
+    } finally {
+      historyBusy = false;
+    }
+  }
+
   function formatTimestamp(value) {
     if (!value) return 'Feed timestamp unavailable';
     const date = new Date(value);
@@ -368,13 +490,14 @@
   }
 
   async function refresh() {
-    if (busy || !document.getElementById('tab-live-map')?.classList.contains('active')) return;
+    if (historicalViewActive || busy || !document.getElementById('tab-live-map')?.classList.contains('active')) return;
     busy = true;
     try {
       ensureMap();
       const response = await fetch(API, {cache:'no-store', credentials:'same-origin'});
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      if (historicalViewActive) return;
       const pilots = Array.isArray(data.pilots) ? data.pilots : [];
       updateMarkers(pilots);
       if (selectedCid) {
@@ -391,6 +514,7 @@
       }
       renderFlightTracks(pilots);
       renderPilotList(pilots);
+      refreshHistory();
       if ($('vatsimPilotCount')) $('vatsimPilotCount').textContent = `${data.online_count || 0} online`;
       if ($('vatsimPilotListCount')) $('vatsimPilotListCount').textContent = `${data.online_count || 0} online`;
       if ($('vatsimUpdatedAt')) $('vatsimUpdatedAt').textContent = formatTimestamp(data.updated_at);
@@ -408,6 +532,7 @@
     ensureMap();
     if (map) setTimeout(() => map.invalidateSize(), 100);
     refresh();
+    refreshHistory(true);
     if (!timer) timer = setInterval(refresh, REFRESH_MS);
   }
 
