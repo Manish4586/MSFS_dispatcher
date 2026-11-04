@@ -968,17 +968,9 @@ async def vatsim_registered(request: Request):
     }
 
 
-@app.get('/api/vatsim/history/{cid}')
-async def vatsim_flight_history(cid: str, request: Request,
-                                session_id: str | None = Query(default=None, max_length=40)):
-    r = redis_required()
-    if not re.fullmatch(r'\d{1,9}', cid):
-        raise HTTPException(status_code=400, detail='Invalid VATSIM CID')
-    await rate_limit(f'fltplan:ratelimit:vatsim-history:{client_ip(request)}', 30, 60)
-    registrations = await r.hgetall('fltplan:vatsim:members')
-    if cid not in {str(value) for value in registrations.values()}:
-        raise HTTPException(status_code=404, detail='VATSIM CID is not registered')
-    sessions = await r.zrevrange(f'fltplan:vatsim:track:sessions:{cid}', 0, 99)
+async def _vatsim_history_for_cid(r: Redis, cid: str, session_id: str | None = None,
+                                  max_sessions: int = 20) -> list[dict[str, Any]]:
+    sessions = await r.zrevrange(f'fltplan:vatsim:track:sessions:{cid}', 0, max_sessions - 1)
     if session_id:
         if session_id not in sessions:
             raise HTTPException(status_code=404, detail='Flight history session not found')
@@ -998,10 +990,67 @@ async def vatsim_flight_history(cid: str, request: Request,
         for raw in reversed(raw_points):
             try:
                 p = json.loads(raw)
-                points.append({'latitude': p['lat'], 'longitude': p['lon'], 'timestamp': p.get('ts')})
+                points.append({
+                    'latitude': p['lat'],
+                    'longitude': p['lon'],
+                    'timestamp': p.get('ts'),
+                    'altitude': p.get('altitude'),
+                    'groundspeed': p.get('groundspeed'),
+                    'heading': p.get('heading'),
+                    'on_ground': bool(p.get('on_ground')),
+                    'gap_before': bool(p.get('gap_before')),
+                    'gap_seconds': p.get('gap_seconds', 0),
+                })
             except (ValueError, TypeError, KeyError):
                 continue
-        history.append({**meta, 'track_points': len(points), 'track': points})
+        if not points:
+            continue
+        history.append({
+            **meta,
+            'cid': cid,
+            'session_id': sid,
+            'track_points': len(points),
+            'started_at': points[0].get('timestamp'),
+            'ended_at': points[-1].get('timestamp'),
+            'track': points,
+        })
+    return history
+
+
+@app.get('/api/vatsim/history')
+async def vatsim_all_flight_history(request: Request):
+    r = redis_required()
+    await rate_limit(f'fltplan:ratelimit:vatsim-history-all:{client_ip(request)}', 12, 60)
+    cids = set()
+    async for key in r.scan_iter(match='fltplan:vatsim:track:sessions:*', count=500):
+        cid = str(key).rsplit(':', 1)[-1]
+        if re.fullmatch(r'\d{1,9}', cid):
+            cids.add(cid)
+
+    pilots = []
+    for cid in sorted(cids):
+        sessions = await _vatsim_history_for_cid(r, cid, max_sessions=20)
+        if sessions:
+            latest = sessions[0]
+            pilots.append({
+                'cid': cid,
+                'callsign': latest.get('callsign') or f'CID {cid}',
+                'name': latest.get('name') or '',
+                'sessions': sessions,
+                'last_seen': latest.get('last_seen') or latest.get('ended_at'),
+            })
+    pilots.sort(key=lambda item: str(item.get('last_seen') or ''), reverse=True)
+    return {'pilots': pilots, 'retention_days': 30, 'session_limit_per_pilot': 20}
+
+
+@app.get('/api/vatsim/history/{cid}')
+async def vatsim_flight_history(cid: str, request: Request,
+                                session_id: str | None = Query(default=None, max_length=40)):
+    r = redis_required()
+    if not re.fullmatch(r'\d{1,9}', cid):
+        raise HTTPException(status_code=400, detail='Invalid VATSIM CID')
+    await rate_limit(f'fltplan:ratelimit:vatsim-history:{client_ip(request)}', 30, 60)
+    history = await _vatsim_history_for_cid(r, cid, session_id=session_id, max_sessions=100)
     return {'cid': cid, 'sessions': history, 'retention_days': 30}
 
 

@@ -102,41 +102,6 @@
       "channel_name": "daily-flights✈️",
       "message_id": "1567493538311307275",
       "message_url": "https://discord.com/channels/1243567695367114854/1504142285535969340/1567493538311307275"
-    },
-    {
-      "dep": "VIMB",
-      "arr": "VIAX",
-      "dep_name": "Moradabad Airport",
-      "arr_name": "Adampur Airport",
-      "dep_country": "IN",
-      "arr_country": "IN",
-      "aircraft": "Airbus A320ceo",
-      "aircraft_category": "Narrow-body",
-      "cruise_kts": 460,
-      "scenery": "Mountain / Alpine",
-      "time_label": "Day (auto)",
-      "departure_utc": "05:00 UTC",
-      "distance_nm": 227,
-      "duration": "55m",
-      "block_minutes": 55,
-      "liveries": [
-        "easyJet",
-        "Lufthansa",
-        "American Airlines",
-        "IndiGo",
-        "Qantas"
-      ],
-      "max_time_minutes": 60,
-      "id": "e948c61d55064939bd3f1dafd5e1264e",
-      "created_at": "2026-11-04T05:32:19.431857+00:00",
-      "user_id": "893758938980429845",
-      "username": "manish4586",
-      "guild_id": "1243567695367114854",
-      "guild_name": "BABURAO's server",
-      "channel_id": "1504142285535969340",
-      "channel_name": "daily-flights✈️",
-      "message_id": "1567411128026267704",
-      "message_url": "https://discord.com/channels/1243567695367114854/1504142285535969340/1567411128026267704"
     }
   ]
 }
